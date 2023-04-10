@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 import argparse
+from sklearn.cluster import KMeans
+from sklearn.mixture import GMM
 
 GC_BGD = 0 # Hard bg pixel
 GC_FGD = 1 # Hard fg pixel, will not be used
@@ -14,6 +16,8 @@ def grabcut(img, rect, n_iter=5):
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
     x, y, w, h = rect
+    # w -= x
+    # h -= y
 
     #Initalize the inner square to Foreground
     mask[y:y+h, x:x+w] = GC_PR_FGD
@@ -36,18 +40,36 @@ def grabcut(img, rect, n_iter=5):
     # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
-
+# NEEDS TO ADD n components=5
 def initalize_GMMs(img, mask):
     # TODO: implement initalize_GMMs
-    bgGMM = None
-    fgGMM = None
+    BGkmeans = KMeans(5, random_state=0)
+    FGkmeans = KMeans(5, random_state=0)
+    bgGMM = BGkmeans.fit(img[mask==GC_BGD]).labels_
+    fgGMM = FGkmeans.fit(img[mask==GC_FGD or mask==GC_PR_FGD]).labels_
 
     return bgGMM, fgGMM
+
+
+def pi_func(alpha, cluster, bg):
+    if bg == True:
+        nominator = 
+        denominator = img[mask == GC_BGD].size
+
+
+def assign_GMMs(img, mask, bgGMM, fgGMM):
+    
+    return None
+
+
+def learn_GMMs():
+    return None
 
 
 # Define helper functions for the GrabCut algorithm
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
+    
     return bgGMM, fgGMM
 
 
