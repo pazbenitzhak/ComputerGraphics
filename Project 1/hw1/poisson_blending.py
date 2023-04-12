@@ -8,7 +8,9 @@ import argparse
 
 def poisson_blend(im_src, im_tgt, im_mask, center):
     # TODO: Implement Poisson blending of the source image onto the target ROI
-
+    if im_mask.size > im_tgt.size:
+        raise Exception("Invalid input! Target image bigger than image mask")
+    
     im_blend = im_tgt
     return im_blend
 

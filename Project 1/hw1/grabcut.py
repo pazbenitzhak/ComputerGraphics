@@ -5,13 +5,23 @@ from sklearn.cluster import KMeans
 from sklearn.mixture import GMM
 import igraph as ig
 
+# Constatns
 GC_BGD = 0 # Hard bg pixel
 GC_FGD = 1 # Hard fg pixel, will not be used
 GC_PR_BGD = 2 # Soft bg pixel
 GC_PR_FGD = 3 # Soft fg pixel
 CLUSTERS_NUM = 5 # Based on the instructions
 GAMMA = 50 # According to the article 
-
+LAST_ENERGY = None
+CONVERGENCE_ITERATIONS = -1
+EPSILON = 0.001
+CONVERGENCE_NUM = 5
+N_EDGES = []
+N_CAPACITIES = []
+GRAPH_SOURCE = -1   # s vertex
+GRAPH_SINK = -1     # t vertex
+N_LINK_CALC = False
+K_CALC = -1
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
@@ -119,7 +129,7 @@ def update_GMMs(img, mask, bgGMM, fgGMM):
     return bgGMM, fgGMM
 
 
-def beta(img):
+def calc_beta(img):
     #in order to avoid duoble calculation we calculate based on 4 way connectivity
     left_neighbor_dist = np.square(img[:, 1:] - img[:, :-1])
     upleft_neighbor_dist = np.square(img[1:, 1:] - img[:-1, :-1])
@@ -128,24 +138,126 @@ def beta(img):
 
 
     nomenator = np.sum(left_neighbor_dist) + np.sum(upleft_neighbor_dist) + \
-    np.sum(up_neighbor_dist) + np.sum(upright_neighbor_dist)
+        np.sum(up_neighbor_dist) + np.sum(upright_neighbor_dist)
 
 
     # We need the size of all sub images, basically they are the size of 4 regualer images minus 
     # 3 cloumns because of left, upleft and upright neighbors and minus 3 rows because of upleft,
     # upright and up neighbors. we add 2 more pixels because of double subtruction of the edge
     # pixels of the first row.
-    denomenator = (4 * img.shape[0] * img.shape[1]) - (3 * img.shape[1]) - (3 * img.shape[0]) + 2
+    denomenator = (4 * img.shape[0] * img.shape[1]) - (3 * img.shape[1]) - \
+          (3 * img.shape[0]) + 2
     
     
     expectation = nomenator / denomenator
     return 1 / (2 * expectation)
 
 
+def add_n_links(edges, capacities, img):
+    beta = calc_beta(img)
+    # We wright it like this so each node will have a unique identifier in the graph
+    img_indicies = np.arange(img.shape[0] * img.shape[1])
+    img_indicies.reshape(img.shape[0], img.shape[1])
+
+    # Upper left neighbor
+    nodes = img_indicies[1:,1:]
+    neighbors = img_indicies[:-1,:-1]
+    edges.extend(list(zip(nodes, neighbors)))
+    # N(m,n) function
+    temp_capacity = (50 / np.sqrt(2))* \
+        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    
+    capacities.extend(temp_capacity.reshape(-1).tolist())
+
+    # Upper right neighbor
+    nodes = img_indicies[1:,:-1]
+    neighbors = img_indicies[:-1,1:]
+    edges.extend(list(zip(nodes, neighbors)))
+    # N(m,n) function
+    temp_capacity = (50 / np.sqrt(2))* \
+        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    
+    capacities.extend(temp_capacity.reshape(-1).tolist())
+    
+    # Upper neighbor
+    nodes = img_indicies[1:,:]
+    neighbors = img_indicies[:-1,:]
+    edges.extend(list(zip(nodes, neighbors)))
+    # N(m,n) function
+    temp_capacity = 50 * \
+        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    
+    capacities.extend(temp_capacity.reshape(-1).tolist())
+
+    # Left neighbor
+    nodes = img_indicies[:,1:]
+    neighbors = img_indicies[:,:-1]
+    edges.extend(list(zip(nodes, neighbors)))
+    # N(m,n) function
+    temp_capacity = 50 * \
+        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    
+    capacities.extend(temp_capacity.reshape(-1).tolist())
+
+    return edges, capacities
+
+
+
+
+def add_t_links(edges, capacities, img, bg_indicies, fg_indicies, unk_indiecies):
+    # The source is our foreground node, and sink is background node
+    if K_CALC == -1:
+        K_CALC = max()
+
+
+    # source & background
+    edges.extend(list(zip([GRAPH_SOURCE] * bg_indicies.size, bg_indicies)))
+    capacities.extend([0] * bg_indicies.size)
+
+    # sink & background
+    edges.extend(list(zip([GRAPH_SINK] * bg_indicies.size, bg_indicies)))
+    capacities.extend([] * bg_indicies.size)
+    return edges, capacities
+
+
+def build_graph(img, mask):
+    GRAPH_SOURCE = img.shape[0] * img.shape[1]
+    GRAPH_SINK = GRAPH_SOURCE + 1
+    bg_indicies = np.where(mask == GC_BGD)
+    fg_indicies = np.where(mask == GC_FGD)
+    # check for a better implenentation on refrence*****************************************
+    unk_indices = np.where(mask == GC_PR_BGD or mask == GC_PR_FGD)
+
+    edges = []
+    capacities = []
+
+    # Creating n links
+    if not N_LINK_CALC:
+        N_EDGES, N_CAPACITIES = add_n_links(edges, capacities, img)
+        N_LINK_CALC = True
+
+    edges.extend(N_EDGES)
+    capacities.extend(N_CAPACITIES)
+
+    # Creating t links
+    t_edges, t_capacities = \
+        add_t_links(edges, capacities, img, bg_indicies[0], fg_indicies[0], unk_indices)
+    edges.extend(t_edges)
+    capacities.extend(t_capacities)
+
+    # Building the graph with s and t additional verticies
+    graph = ig.Graph(img.shape[0]*img.shape[1] + 2)
+    graph.add_edges(edges)
+
+    return graph, capacities
+
+
+
 def calculate_mincut(img, mask, bgGMM, fgGMM):
     # TODO: implement energy (cost) calculation step and mincut
     min_cut = [[], []]
     energy = 0
+    graph, capacities = build_graph(img, mask)
     return min_cut, energy
 
 
@@ -156,14 +268,46 @@ def update_mask(mincut_sets, mask):
 
 def check_convergence(energy):
     # TODO: implement convergence check
-    convergence = False
+    if CONVERGENCE_ITERATIONS == -1 :
+        CONVERGENCE_ITERATIONS += 1
+        convergence = False
+    
+    elif np.abs(energy - LAST_ENERGY) < EPSILON:
+        CONVERGENCE_ITERATIONS += 1
+        if CONVERGENCE_ITERATIONS == CONVERGENCE_NUM:
+            convergence = True
+    else:
+        CONVERGENCE_ITERATIONS = 0
+        convergence = False
+        LAST_ENERGY = energy
+        
     return convergence
+
 
 
 def cal_metric(predicted_mask, gt_mask):
     # TODO: implement metric calculation
+    """
+    our accourcy is calculated by the number of pixels that the predicted mask and gt_mask agree on.
+    And then we count them and devide them by the number of total pixels
 
-    return 100, 100
+    """
+    compare = (predicted_mask == gt_mask).astype(int)
+    cnt = np.count_nonzero(compare)
+    total_pixels = predicted_mask.shape[0] * predicted_mask.shape[1]
+    accuarcy = cnt / total_pixels
+
+    """
+    Our Jaccard is calculted by the number of pixels that they agree on and are not labels 
+    as background. Then we count them and devide them all by number of intersection pixels and 
+    all agreed pixels.
+
+    """
+    fg_intersection = (predicted_mask == gt_mask and predicted_mask != GC_BGD).astype(int)
+    intersection_size = np.count_nonzero(fg_intersection)
+    jaccard = intersection_size / (intersection_size + (total_pixels - cnt))
+    
+    return accuarcy, jaccard
 
 def parse():
     parser = argparse.ArgumentParser()
