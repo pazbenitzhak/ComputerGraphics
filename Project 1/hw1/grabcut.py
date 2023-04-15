@@ -69,8 +69,9 @@ def initalize_GMMs(img, mask):
 def d_func(img, mask, weights, mean, cov, isBG):
     if isBG == GC_BGD:
         diffrence = img[mask == GC_BGD] - mean
+    else:
+        diffrence = img[mask == GC_FGD] - mean
 
-    diffrence = img[mask == GC_FGD] - mean
     value = -np.log10(weights) + 0.5*np.log10(np.linalg.det(cov)) + \
     0.5*np.dot(diffrence.T, np.dot(np.linalg.inv(cov), diffrence))
     return value
@@ -116,7 +117,6 @@ def learn_GMMs(img, mask, bgGMM_assign, fgGMM_assign):
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
     if not isinstance(bgGMM, tuple):      
-
         # On first iteration, same fuctionality as learn GMMs
         bg_param, fg_param = learn_GMMs(img, mask, bgGMM, fgGMM)
 
@@ -159,35 +159,71 @@ def add_n_links(edges, capacities, img):
     img_indicies = np.arange(img.shape[0] * img.shape[1])
     img_indicies.reshape(img.shape[0], img.shape[1])
 
+    # We calculating both N(m,n) for n-links and K for t-links for a later use
+    k_list = np.array([0 for i in range(img.shape[0]*img.shape[1])])
+    zero_row = np.array([0 for i in range(img.shape[1])])
+
     # Upper left neighbor
     nodes = img_indicies[1:,1:]
     neighbors = img_indicies[:-1,:-1]
     edges.extend(list(zip(nodes, neighbors)))
+    
     # N(m,n) function
     temp_capacity = (50 / np.sqrt(2))* \
         (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
     
-    capacities.extend(temp_capacity.reshape(-1).tolist())
+    one_row_capacity = temp_capacity.reshape(-1)
+    capacities.extend(one_row_capacity.tolist())
+    upper_left = np.copy(temp_capacity)
+    upper_left = np.insert(upper_left, 0, 0, axis=1)
+    upper_left = upper_left.reshape(-1)
+    upper_left = np.concatenate(zero_row[1:], upper_left)
+    down_right = np.copy(temp_capacity)
+    down_right = np.insert(down_right, 0, down_right.shape[1], axis=1)
+    down_right = down_right.reshape(-1)
+    down_right = np.concatenate(down_right, zero_row[1:])
+    k_list += upper_left
+    k_list += down_right
+
 
     # Upper right neighbor
     nodes = img_indicies[1:,:-1]
     neighbors = img_indicies[:-1,1:]
     edges.extend(list(zip(nodes, neighbors)))
+    
     # N(m,n) function
     temp_capacity = (50 / np.sqrt(2))* \
         (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
     
-    capacities.extend(temp_capacity.reshape(-1).tolist())
+    one_row_capacity = temp_capacity.reshape(-1)
+    capacities.extend(one_row_capacity.tolist())
+    upper_right = np.copy(temp_capacity)
+    upper_right = np.insert(upper_right, 0, upper_right.shape[1], axis=1)
+    upper_right = upper_right.reshape(-1)
+    upper_right = np.concatenate(zero_row[1:], upper_left)
+    down_left = np.copy(temp_capacity)
+    down_left = np.insert(down_left, 0, 0, axis=1)
+    down_left = down_left.reshape(-1)
+    down_left = np.concatenate(down_left, zero_row[1:])
+    k_list += upper_right
+    k_list += down_left
     
+
     # Upper neighbor
     nodes = img_indicies[1:,:]
     neighbors = img_indicies[:-1,:]
     edges.extend(list(zip(nodes, neighbors)))
+    
     # N(m,n) function
     temp_capacity = 50 * \
         (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
     
-    capacities.extend(temp_capacity.reshape(-1).tolist())
+    one_row_capacity = temp_capacity.reshape(-1)
+    capacities.extend(one_row_capacity.tolist())
+    upper_concat = np.concatenate((zero_row, one_row_capacity))
+    lower_concat = np.concatenate((one_row_capacity, zero_row))
+    k_list += upper_concat
+    k_list += lower_concat
 
     # Left neighbor
     nodes = img_indicies[:,1:]
@@ -197,18 +233,37 @@ def add_n_links(edges, capacities, img):
     temp_capacity = 50 * \
         (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
     
-    capacities.extend(temp_capacity.reshape(-1).tolist())
+    one_row_capacity = temp_capacity.reshape(-1)
+    capacities.extend(one_row_capacity.tolist())
+    
+    left_concat = np.copy(temp_capacity)
+    left_concat = np.insert(left_concat, 0, 0, axis=1)
+    right_concat = np.copy(temp_capacity)
+    right_concat = np.insert(right_concat, right_concat.shape[1], 0, axis=1)
+    k_list += left_concat.reshape(-1)
+    k_list += right_concat.reshape(-1)
+
+    # Calculating K vlaue
+    K_CALC = max(k_list)
 
     return edges, capacities
 
 
 
+def calc_d_likelihood(img, mask, weights, mean, cov, isBG):
+    if isBG == GC_PR_BGD:
+        diffrence = img[mask == GC_PR_BGD] - mean
+    else:
+        diffrence = img[mask == GC_PR_FGD] - mean
 
-def add_t_links(edges, capacities, img, bg_indicies, fg_indicies, unk_indiecies):
+    value = weights * 1/np.sqrt((np.linalg.det(cov))) * \
+    np.exp(-0.5*np.dot(diffrence.T, np.dot(np.linalg.inv(cov), diffrence)))
+    return value
+    
+
+def add_t_links(edges, capacities, img, mask, bgGMM, fgGMM, bg_indicies, fg_indicies, unk_indicies):
     # The source is our foreground node, and sink is background node
-    if K_CALC == -1:
-        K_CALC = max()
-
+    # If we got here we already have the K value calculated
 
     # source & background
     edges.extend(list(zip([GRAPH_SOURCE] * bg_indicies.size, bg_indicies)))
@@ -216,11 +271,40 @@ def add_t_links(edges, capacities, img, bg_indicies, fg_indicies, unk_indiecies)
 
     # sink & background
     edges.extend(list(zip([GRAPH_SINK] * bg_indicies.size, bg_indicies)))
-    capacities.extend([] * bg_indicies.size)
+    capacities.extend([K_CALC] * bg_indicies.size)
+
+    # source & foreground
+    edges.extend(list(zip([GRAPH_SOURCE] * fg_indicies.size, fg_indicies)))
+    capacities.extend([K_CALC] * fg_indicies.size)
+
+    # sink & foreground
+    edges.extend(list(zip([GRAPH_SINK] * fg_indicies.size, fg_indicies)))
+    capacities.extend([0] * fg_indicies.size)
+
+    # source & unknownBG
+    edges.extend(list(zip([GRAPH_SOURCE] * unk_indicies.size, unk_indicies)))
+    for i in range(CLUSTERS_NUM):
+        background_val += calc_d_likelihood(img, mask, bgGMM[0], bgGMM[1], bgGMM[2], GC_PR_BGD)
+    total_value = -np.log10(background_val)
+    capacities.extend(total_value.tolist())
+
+    # sink & unknownFG
+    edges.extend(list(zip([GRAPH_SINK] * unk_indicies.size, unk_indicies)))
+    for i in range(CLUSTERS_NUM):
+        foreground_val = calc_d_likelihood(img, mask, fgGMM[0], fgGMM[1], fgGMM[2], GC_PR_FGD)
+    total_value = -np.log10(foreground_val)
+    capacities.extend(total_value.tolist())
+
+    """
+    Is D func returns scalar or matrix?
+    is cov of the matrix is 1X1?
+    """
+
+
     return edges, capacities
 
 
-def build_graph(img, mask):
+def build_graph(img, mask, bgGMM, fgGMM):
     GRAPH_SOURCE = img.shape[0] * img.shape[1]
     GRAPH_SINK = GRAPH_SOURCE + 1
     bg_indicies = np.where(mask == GC_BGD)
@@ -241,7 +325,8 @@ def build_graph(img, mask):
 
     # Creating t links
     t_edges, t_capacities = \
-        add_t_links(edges, capacities, img, bg_indicies[0], fg_indicies[0], unk_indices)
+        add_t_links(edges, capacities, img, mask, bgGMM, fgGMM, \
+                     bg_indicies[0], fg_indicies[0], unk_indices[0])
     edges.extend(t_edges)
     capacities.extend(t_capacities)
 
@@ -255,9 +340,10 @@ def build_graph(img, mask):
 
 def calculate_mincut(img, mask, bgGMM, fgGMM):
     # TODO: implement energy (cost) calculation step and mincut
-    min_cut = [[], []]
-    energy = 0
-    graph, capacities = build_graph(img, mask)
+    graph, capacities = build_graph(img, mask, bgGMM, fgGMM)
+    st_mincut = graph.st_mincut(GRAPH_SOURCE, GRAPH_SINK, capacities)
+    energy = st_mincut[0]
+    min_cut = [st_mincut[1], st_mincut[2]]
     return min_cut, energy
 
 
