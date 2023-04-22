@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 import argparse
 from sklearn.cluster import KMeans
-from sklearn.mixture import GMM
+#from sklearn.mixture import GMM
 import igraph as ig
 
 # Constatns
@@ -45,7 +45,7 @@ def grabcut(img, rect, n_iter=5):
 
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
 
-        mask = update_mask(mincut_sets, mask)
+        mask = update_mask(mincut_sets, mask, img)
 
         if check_convergence(energy):
             break
@@ -347,8 +347,13 @@ def calculate_mincut(img, mask, bgGMM, fgGMM):
     return min_cut, energy
 
 
-def update_mask(mincut_sets, mask):
+def update_mask(mincut_sets, mask, img):
     # TODO: implement mask update step
+    unk_indices = np.where(np.logical_or(mask == GC_PR_BGD, mask = GC_PR_FGD))
+    array_indicies = np.arange(img.shape[0] * img.shape[1])
+    array_indicies.reshape(img.shape[0], img.shape[1])
+    condition = np.isin(array_indicies[unk_indices], mincut_sets[0])
+    mask[unk_indices] = np.where(condition, GC_PR_FGD, GC_PR_BGD)
     return mask
 
 
