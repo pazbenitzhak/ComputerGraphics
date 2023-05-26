@@ -2,7 +2,10 @@ import numpy as np
 import cv2
 import argparse
 from sklearn.cluster import KMeans
-#from sklearn.mixture import GMM
+from sklearn.mixture import GaussianMixture
+from scipy.stats import multivariate_normal
+from scipy.linalg import cholesky
+import matplotlib.pyplot as plt
 import igraph as ig
 
 # Constatns
@@ -10,123 +13,137 @@ GC_BGD = 0 # Hard bg pixel
 GC_FGD = 1 # Hard fg pixel, will not be used
 GC_PR_BGD = 2 # Soft bg pixel
 GC_PR_FGD = 3 # Soft fg pixel
-CLUSTERS_NUM = 5 # Based on the instructions
-GAMMA = 50 # According to the article 
-LAST_ENERGY = None
+CLUSTERS_NUM = 8 # Based on the instructions
+LAST_ENERGY = 0
 CONVERGENCE_ITERATIONS = -1
-EPSILON = 0.001
-CONVERGENCE_NUM = 5
+EPSILON = 0.0001
+CONVERGENCE_NUM = 2
 N_EDGES = []
 N_CAPACITIES = []
 GRAPH_SOURCE = -1   # s vertex
 GRAPH_SINK = -1     # t vertex
 N_LINK_CALC = False
 K_CALC = -1
+LAST_CUT_SIZE = 0
+DIFF_CUT = -1
+IS_INITAL = False
 
 # Define the GrabCut algorithm function
 def grabcut(img, rect, n_iter=5):
     # Assign initial labels to the pixels based on the bounding box
+    # img = img.astype(np.float32)
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
     mask.fill(GC_BGD)
     x, y, w, h = rect
-    # w -= x
-    # h -= y
+    w -= x
+    h -= y
 
     #Initalize the inner square to Foreground
     mask[y:y+h, x:x+w] = GC_PR_FGD
     mask[rect[1]+rect[3]//2, rect[0]+rect[2]//2] = GC_FGD
+    
 
     bgGMM, fgGMM = initalize_GMMs(img, mask)
-
     num_iters = 1000
     for i in range(num_iters):
         #Update GMM
         bgGMM, fgGMM = update_GMMs(img, mask, bgGMM, fgGMM)
-
         mincut_sets, energy = calculate_mincut(img, mask, bgGMM, fgGMM)
 
         mask = update_mask(mincut_sets, mask, img)
-
+        
         if check_convergence(energy):
+            mask[GC_PR_BGD] = GC_BGD
+            #mask[GC_PR_FGD] = GC_FGD
+            
             break
 
     # Return the final mask and the GMMs
     return mask, bgGMM, fgGMM
 
+
+def get_triplets(indices,labels,comps):
+    weights = []
+    means = []
+    covs = [] 
+
+    for i in range(comps):
+        sliced_img = indices[labels == i]
+        if sliced_img.size < 9:
+            means.append(np.array([-1, -1, -1]))
+            cov = EPSILON*np.eye(3)
+            covs.append(cov)
+        else:
+            means.append(np.mean(sliced_img, axis=0))
+            cov = EPSILON*np.eye(3) + np.cov(sliced_img.T)
+            covs.append(cov)
+
+    means = np.array(means)
+    covs = np.array(covs)
+    weights = np.ones(comps) / comps
+    pre_chol = np.linalg.cholesky(np.linalg.inv(covs)).transpose((0, 2, 1))
+    return weights, means, covs, pre_chol
+
+
 # NEEDS TO ADD n components=5
 def initalize_GMMs(img, mask):
     # TODO: implement initalize_GMMs
-    BGkmeans = KMeans(CLUSTERS_NUM, random_state=0)
-    FGkmeans = KMeans(CLUSTERS_NUM, random_state=0)
-    bgGMM = BGkmeans.fit(img[mask==GC_BGD]).labels_
-    fgGMM = FGkmeans.fit(img[mask==GC_FGD or mask==GC_PR_FGD]).labels_
+    BGkmeans = KMeans(CLUSTERS_NUM).fit(img[np.logical_or(mask == GC_BGD, mask == GC_PR_BGD)])
+    FGkmeans = KMeans(CLUSTERS_NUM).fit(img[np.logical_or(mask == GC_FGD, mask == GC_PR_FGD)])
+    bgGMM = GaussianMixture(CLUSTERS_NUM, random_state=0)
+    fgGMM = GaussianMixture(CLUSTERS_NUM, random_state=0)
+    bg_weights, bg_means, bg_covs, bg_prechol = get_triplets(img[np.logical_or(mask == GC_BGD, mask == GC_PR_BGD)], BGkmeans.labels_, CLUSTERS_NUM)
+    bgGMM.weights_ = bg_weights
+    bgGMM.means_ = bg_means
+    bgGMM.covariances_ = bg_covs
+    bgGMM.precisions_cholesky_ = bg_prechol
 
+    fg_weights, fg_means, fg_covs, fg_prechol = get_triplets(img[np.logical_or(mask == GC_FGD, mask == GC_PR_FGD)], FGkmeans.labels_, CLUSTERS_NUM)
+    fgGMM.weights_ = fg_weights
+    fgGMM.means_ = fg_means
+    fgGMM.covariances_ = fg_covs
+    fgGMM.precisions_cholesky_ = fg_prechol
+
+    
     return bgGMM, fgGMM
-
-
-
-
-def d_func(img, mask, weights, mean, cov, isBG):
-    if isBG == GC_BGD:
-        diffrence = img[mask == GC_BGD] - mean
-    else:
-        diffrence = img[mask == GC_FGD] - mean
-
-    value = -np.log10(weights) + 0.5*np.log10(np.linalg.det(cov)) + \
-    0.5*np.dot(diffrence.T, np.dot(np.linalg.inv(cov), diffrence))
-    return value
-    
-
-
-def assign_GMMs(img, mask, bgGMM, fgGMM):
-    # bgGMM & fgGMM are in kmeans labels
-    bg_weights, bg_mean, bg_cov = bgGMM
-    fg_weights, fg_mean, fg_cov = fgGMM
-    bg_d_values = np.array([])
-    fg_d_values = np.array([])
-    
-    for i in range(CLUSTERS_NUM):
-        bg_d_values.append(d_func(img, mask, bg_weights[i], bg_mean[i], bg_cov[i], GC_BGD))
-        fg_d_values.append(d_func(img, mask, fg_weights[i], fg_mean[i], fg_cov[i], GC_FGD))
-
-    bg_d_values.T
-    fg_d_values.T
-
-    new_bg_assignments = np.argmin(bg_d_values, axis=1)
-    new_fg_assignments = np.argmin(fg_d_values, axis=1)
-
-    return new_bg_assignments, new_fg_assignments
-
-
-def learn_GMMs(img, mask, bgGMM_assign, fgGMM_assign):
-    bg_weights = np.bincount(bgGMM_assign) / bgGMM_assign.size
-    fg_weights = np.bincount(fgGMM_assign) / fgGMM_assign.size
-    bg_mean = np.array([np.mean(img[bgGMM_assign==i] for i in range(CLUSTERS_NUM))])
-    fg_mean = np.array([np.mean(img[fgGMM_assign==i] for i in range(CLUSTERS_NUM))])
-    bg_cov = np.array([np.cov(img[bgGMM_assign==i] for i in range(CLUSTERS_NUM))])
-    fg_cov = np.array([np.cov(img[fgGMM_assign==i] for i in range(CLUSTERS_NUM))])
-
-    bg_param = (bg_weights, bg_mean, bg_cov)
-    fg_param = (fg_weights, fg_mean, fg_cov)
-    
-    return bg_param, fg_param
 
 
 
 # Define helper functions for the GrabCut algorithm
 def update_GMMs(img, mask, bgGMM, fgGMM):
     # TODO: implement GMM component assignment step
-    if not isinstance(bgGMM, tuple):      
-        # On first iteration, same fuctionality as learn GMMs
-        bg_param, fg_param = learn_GMMs(img, mask, bgGMM, fgGMM)
+    global IS_INITAL
 
-        new_bg_assign, new_fg_assign = assign_GMMs(img, mask, bg_param, fg_param)
-    else:
-        new_bg_assign, new_fg_assign = assign_GMMs(img, mask, bgGMM, fgGMM)
+    h_img = img.shape[0]
+    w_img = img.shape[1]
+    
 
-    bgGMM, fgGMM = learn_GMMs(img, mask, new_bg_assign, new_fg_assign)
+    new_img = np.argwhere(img[np.logical_or(mask == GC_BGD, mask == GC_PR_BGD)])
+    new_img = np.argwhere(np.logical_or(mask == GC_BGD, mask == GC_PR_BGD))
+    flat_new_img = np.ravel_multi_index(np.transpose(new_img),(h_img, w_img))
+    indices = img.reshape((img.shape[0] * img.shape[1]), img.shape[2])[flat_new_img]
+    labels = bgGMM.predict(indices)
+    bg_weights, bg_means ,bg_covs, bg_pre_chol = get_triplets(indices, labels, CLUSTERS_NUM)
+    bg_gmm = GaussianMixture(CLUSTERS_NUM)
+    bg_gmm.weights_ = bg_weights
+    bg_gmm.means_ = bg_means
+    bg_gmm.covariances_ = bg_covs
+    bg_gmm.precisions_cholesky_ = bg_pre_chol
+    
+    new_img = np.argwhere(img[np.logical_or(mask == GC_FGD, mask == GC_PR_FGD)])
+    new_img = np.argwhere(np.logical_or(mask == GC_FGD, mask == GC_PR_FGD))
+    flat_new_img = np.ravel_multi_index(np.transpose(new_img), (h_img, w_img))
+    indices = img.reshape((img.shape[0] * img.shape[1]), img.shape[2])[flat_new_img]
+    labels = fgGMM.predict(indices)
+    fg_weights, fg_means, fg_covs, fg_pre_chol = get_triplets(indices, labels, CLUSTERS_NUM)
+    fg_gmm = GaussianMixture(CLUSTERS_NUM)
+    fg_gmm.weights_ = fg_weights
+    fg_gmm.means_ = fg_means
+    fg_gmm.covariances_ = fg_covs
+    fg_gmm.precisions_cholesky_ = fg_pre_chol
 
-    return bgGMM, fgGMM
+
+    return bg_gmm, fg_gmm
 
 
 def calc_beta(img):
@@ -154,117 +171,115 @@ def calc_beta(img):
 
 
 def add_n_links(edges, capacities, img):
+    global K_CALC
     beta = calc_beta(img)
+
     # We wright it like this so each node will have a unique identifier in the graph
     img_indicies = np.arange(img.shape[0] * img.shape[1])
-    img_indicies.reshape(img.shape[0], img.shape[1])
+    img_indicies = img_indicies.reshape(img.shape[0], img.shape[1])
 
     # We calculating both N(m,n) for n-links and K for t-links for a later use
-    k_list = np.array([0 for i in range(img.shape[0]*img.shape[1])])
     zero_row = np.array([0 for i in range(img.shape[1])])
 
     # Upper left neighbor
     nodes = img_indicies[1:,1:]
     neighbors = img_indicies[:-1,:-1]
-    edges.extend(list(zip(nodes, neighbors)))
+    nodes_reshape = nodes.reshape(-1)
+    neighbors_reshape = neighbors.reshape(-1)
+    edges.extend(list(zip(nodes_reshape, neighbors_reshape)))
     
+
     # N(m,n) function
-    temp_capacity = (50 / np.sqrt(2))* \
-        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    temp_capacity = (50 / np.sqrt(2)) * \
+        (np.exp(-beta*np.sum(np.square(img[1:, 1:] - img[:-1, :-1]), axis=2)))
     
+  
     one_row_capacity = temp_capacity.reshape(-1)
     capacities.extend(one_row_capacity.tolist())
-    upper_left = np.copy(temp_capacity)
-    upper_left = np.insert(upper_left, 0, 0, axis=1)
-    upper_left = upper_left.reshape(-1)
-    upper_left = np.concatenate(zero_row[1:], upper_left)
-    down_right = np.copy(temp_capacity)
-    down_right = np.insert(down_right, 0, down_right.shape[1], axis=1)
-    down_right = down_right.reshape(-1)
-    down_right = np.concatenate(down_right, zero_row[1:])
-    k_list += upper_left
-    k_list += down_right
 
 
     # Upper right neighbor
     nodes = img_indicies[1:,:-1]
     neighbors = img_indicies[:-1,1:]
-    edges.extend(list(zip(nodes, neighbors)))
+    nodes_reshape = nodes.reshape(-1)
+    neighbors_reshape = neighbors.reshape(-1)
+    edges.extend(list(zip(nodes_reshape, neighbors_reshape)))
     
     # N(m,n) function
-    temp_capacity = (50 / np.sqrt(2))* \
-        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    temp_capacity = (50 / np.sqrt(2)) * \
+        (np.exp(-beta*np.sum(np.square(img[1:, :-1] - img[:-1, 1:]), axis=2)))
     
+
     one_row_capacity = temp_capacity.reshape(-1)
     capacities.extend(one_row_capacity.tolist())
     upper_right = np.copy(temp_capacity)
     upper_right = np.insert(upper_right, 0, upper_right.shape[1], axis=1)
     upper_right = upper_right.reshape(-1)
-    upper_right = np.concatenate(zero_row[1:], upper_left)
+    upper_right = np.concatenate((zero_row, upper_right), axis=0)
     down_left = np.copy(temp_capacity)
     down_left = np.insert(down_left, 0, 0, axis=1)
     down_left = down_left.reshape(-1)
-    down_left = np.concatenate(down_left, zero_row[1:])
-    k_list += upper_right
-    k_list += down_left
+    down_left = np.concatenate((down_left, zero_row), axis=0)
+
     
 
     # Upper neighbor
     nodes = img_indicies[1:,:]
     neighbors = img_indicies[:-1,:]
-    edges.extend(list(zip(nodes, neighbors)))
+    nodes_reshape = nodes.reshape(-1)
+    neighbors_reshape = neighbors.reshape(-1)
+    edges.extend(list(zip(nodes_reshape, neighbors_reshape)))
     
     # N(m,n) function
-    temp_capacity = 50 * \
-        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    temp_capacity = (50 / 1) * \
+        (np.exp(-beta*np.sum(np.square(img[1:,:] - img[:-1,:]), axis=2)))
     
+
+
     one_row_capacity = temp_capacity.reshape(-1)
     capacities.extend(one_row_capacity.tolist())
-    upper_concat = np.concatenate((zero_row, one_row_capacity))
-    lower_concat = np.concatenate((one_row_capacity, zero_row))
-    k_list += upper_concat
-    k_list += lower_concat
+    
 
     # Left neighbor
     nodes = img_indicies[:,1:]
     neighbors = img_indicies[:,:-1]
-    edges.extend(list(zip(nodes, neighbors)))
+    nodes_reshape = nodes.reshape(-1)
+    neighbors_reshape = neighbors.reshape(-1)
+    edges.extend(list(zip(nodes_reshape, neighbors_reshape)))
     # N(m,n) function
-    temp_capacity = 50 * \
-        (np.exp(-beta*np.square((np.linalg.norm(nodes - neighbors)))))
+    temp_capacity = (50 / 1) * \
+        (np.exp(-beta*np.sum(np.square(img[:,1:] - img[:,:-1]), axis=2)))
     
+
     one_row_capacity = temp_capacity.reshape(-1)
     capacities.extend(one_row_capacity.tolist())
-    
-    left_concat = np.copy(temp_capacity)
-    left_concat = np.insert(left_concat, 0, 0, axis=1)
-    right_concat = np.copy(temp_capacity)
-    right_concat = np.insert(right_concat, right_concat.shape[1], 0, axis=1)
-    k_list += left_concat.reshape(-1)
-    k_list += right_concat.reshape(-1)
+
+    #k_list += left_concat.reshape(-1)
+    #k_list += right_concat.reshape(-1)
+
+    #create graph
+    n_graph = ig.Graph(img.shape[0]*img.shape[1])
+    n_graph.add_edges(edges)
+    n_graph.es['weight'] = capacities
+    stregnths = n_graph.strength(weights='weight', mode='in')
 
     # Calculating K vlaue
-    K_CALC = max(k_list)
+    K_CALC = max(stregnths)
 
     return edges, capacities
 
 
 
-def calc_d_likelihood(img, mask, weights, mean, cov, isBG):
-    if isBG == GC_PR_BGD:
-        diffrence = img[mask == GC_PR_BGD] - mean
-    else:
-        diffrence = img[mask == GC_PR_FGD] - mean
+def calc_d_likelihood(new_img, means, covs):
+    difference = new_img - means
+    likelihood = np.sum(np.multiply(difference @ np.linalg.inv(covs), difference), axis=1)
+    return likelihood
 
-    value = weights * 1/np.sqrt((np.linalg.det(cov))) * \
-    np.exp(-0.5*np.dot(diffrence.T, np.dot(np.linalg.inv(cov), diffrence)))
-    return value
-    
 
 def add_t_links(edges, capacities, img, mask, bgGMM, fgGMM, bg_indicies, fg_indicies, unk_indicies):
     # The source is our foreground node, and sink is background node
     # If we got here we already have the K value calculated
-
+    global N_LINK_CALC, GRAPH_SINK, GRAPH_SOURCE, K_CALC
     # source & background
     edges.extend(list(zip([GRAPH_SOURCE] * bg_indicies.size, bg_indicies)))
     capacities.extend([0] * bg_indicies.size)
@@ -280,98 +295,121 @@ def add_t_links(edges, capacities, img, mask, bgGMM, fgGMM, bg_indicies, fg_indi
     # sink & foreground
     edges.extend(list(zip([GRAPH_SINK] * fg_indicies.size, fg_indicies)))
     capacities.extend([0] * fg_indicies.size)
+    flat_img = img.reshape(-1, 3)
+    #new_img = flat_img[unk_indicies]
+    flat_mask = mask.flatten()
 
-    # source & unknownBG
+    
+    new_img = flat_img[np.where(np.logical_or(flat_mask == GC_PR_BGD, flat_mask == GC_PR_FGD))[0]]
+    
+    # source & unknown
     edges.extend(list(zip([GRAPH_SOURCE] * unk_indicies.size, unk_indicies)))
+    lst_values = []
     for i in range(CLUSTERS_NUM):
-        background_val += calc_d_likelihood(img, mask, bgGMM[0], bgGMM[1], bgGMM[2], GC_PR_BGD)
-    total_value = -np.log10(background_val)
-    capacities.extend(total_value.tolist())
+        
+        lst_values.append(calc_d_likelihood(new_img, bgGMM.means_[i], bgGMM.covariances_[i])) 
+    
+    values = np.exp(-0.5 * np.array(lst_values))
+    root = bgGMM.weights_ / np.sqrt(np.linalg.det(bgGMM.covariances_))
+    result = -np.log(root @ values)
+    capacities.extend(result.tolist())
 
-    # sink & unknownFG
+    
+    # sink & unknown
     edges.extend(list(zip([GRAPH_SINK] * unk_indicies.size, unk_indicies)))
+    lst_values = []
     for i in range(CLUSTERS_NUM):
-        foreground_val = calc_d_likelihood(img, mask, fgGMM[0], fgGMM[1], fgGMM[2], GC_PR_FGD)
-    total_value = -np.log10(foreground_val)
-    capacities.extend(total_value.tolist())
+        lst_values.append(calc_d_likelihood(new_img, fgGMM.means_[i], fgGMM.covariances_[i]))
+    
+    values = np.exp(-0.5 * np.array(lst_values))
+    root = fgGMM.weights_ / np.sqrt(np.linalg.det(fgGMM.covariances_))
+    result = -np.log(root @ values)
+    
 
-    """
-    Is D func returns scalar or matrix?
-    is cov of the matrix is 1X1?
-    """
+    capacities.extend(result.tolist())
 
 
     return edges, capacities
 
 
+
+
 def build_graph(img, mask, bgGMM, fgGMM):
+    global N_LINK_CALC, GRAPH_SINK, GRAPH_SOURCE, N_CAPACITIES, N_EDGES
     GRAPH_SOURCE = img.shape[0] * img.shape[1]
     GRAPH_SINK = GRAPH_SOURCE + 1
+    flat_mask = mask.flatten()
     bg_indicies = np.where(mask == GC_BGD)
     fg_indicies = np.where(mask == GC_FGD)
-    # check for a better implenentation on refrence*****************************************
-    unk_indices = np.where(mask == GC_PR_BGD or mask == GC_PR_FGD)
+    unk_indices = np.where(np.logical_or(mask == GC_PR_BGD, mask == GC_PR_FGD))
+
 
     edges = []
     capacities = []
 
+    n_calc = N_LINK_CALC
     # Creating n links
-    if not N_LINK_CALC:
-        N_EDGES, N_CAPACITIES = add_n_links(edges, capacities, img)
+    if not n_calc:
+        add_n_links(edges, capacities, img)
+        N_EDGES = edges.copy()
+        N_CAPACITIES = capacities.copy()
         N_LINK_CALC = True
-
-    edges.extend(N_EDGES)
-    capacities.extend(N_CAPACITIES)
+    else:
+        edges.extend(N_EDGES)
+        capacities.extend(N_CAPACITIES)
 
     # Creating t links
-    t_edges, t_capacities = \
-        add_t_links(edges, capacities, img, mask, bgGMM, fgGMM, \
-                     bg_indicies[0], fg_indicies[0], unk_indices[0])
-    edges.extend(t_edges)
-    capacities.extend(t_capacities)
+    t_edges, t_capacities = add_t_links(edges, capacities, img, mask, bgGMM, fgGMM, bg_indicies[0], fg_indicies[0], unk_indices[0])
 
+
+
+    c_edges = t_edges.copy()
     # Building the graph with s and t additional verticies
     graph = ig.Graph(img.shape[0]*img.shape[1] + 2)
-    graph.add_edges(edges)
+    graph.add_edges(c_edges)
+    t_edges.clear()
 
-    return graph, capacities
+
+    return graph, t_capacities
 
 
 
 def calculate_mincut(img, mask, bgGMM, fgGMM):
+    global GRAPH_SINK, GRAPH_SOURCE, LAST_CUT_SIZE, DIFF_CUT
     # TODO: implement energy (cost) calculation step and mincut
     graph, capacities = build_graph(img, mask, bgGMM, fgGMM)
-    st_mincut = graph.st_mincut(GRAPH_SOURCE, GRAPH_SINK, capacities)
-    energy = st_mincut[0]
-    min_cut = [st_mincut[1], st_mincut[2]]
+    c_capacities = capacities.copy()
+    st_mincut = graph.st_mincut(GRAPH_SOURCE, GRAPH_SINK, c_capacities)
+    capacities.clear()
+    energy = st_mincut.value
+    min_cut = [st_mincut.partition[0], st_mincut.partition[1]]
+    DIFF_CUT = len(st_mincut.partition[0]) - LAST_CUT_SIZE
+    LAST_CUT_SIZE = len(st_mincut.partition[0])
     return min_cut, energy
 
 
 def update_mask(mincut_sets, mask, img):
     # TODO: implement mask update step
-    unk_indices = np.where(np.logical_or(mask == GC_PR_BGD, mask = GC_PR_FGD))
-    array_indicies = np.arange(img.shape[0] * img.shape[1])
-    array_indicies.reshape(img.shape[0], img.shape[1])
-    condition = np.isin(array_indicies[unk_indices], mincut_sets[0])
-    mask[unk_indices] = np.where(condition, GC_PR_FGD, GC_PR_BGD)
+
+    old_mask = mask
+    flat_mask = mask.flatten()
+    mask_indicies = np.arange(flat_mask.size)
+    condition1 = np.logical_and(np.isin(mask_indicies, mincut_sets[0]), flat_mask == GC_PR_FGD)
+    condition2 = np.logical_and(np.isin(mask_indicies, mincut_sets[1]), flat_mask == GC_PR_BGD)
+    mask = np.where(condition1, GC_PR_BGD, np.where(condition2, GC_PR_FGD, flat_mask)).reshape(mask.shape)
+
     return mask
 
 
 def check_convergence(energy):
+    global LAST_ENERGY, EPSILON
     # TODO: implement convergence check
-    if CONVERGENCE_ITERATIONS == -1 :
-        CONVERGENCE_ITERATIONS += 1
-        convergence = False
-    
-    elif np.abs(energy - LAST_ENERGY) < EPSILON:
-        CONVERGENCE_ITERATIONS += 1
-        if CONVERGENCE_ITERATIONS == CONVERGENCE_NUM:
-            convergence = True
-    else:
-        CONVERGENCE_ITERATIONS = 0
-        convergence = False
+    convergence = True
+    if np.abs(energy - LAST_ENERGY)/ energy > EPSILON :
         LAST_ENERGY = energy
-        
+        convergence = False
+        return convergence
+
     return convergence
 
 
@@ -394,7 +432,7 @@ def cal_metric(predicted_mask, gt_mask):
     all agreed pixels.
 
     """
-    fg_intersection = (predicted_mask == gt_mask and predicted_mask != GC_BGD).astype(int)
+    fg_intersection = ((predicted_mask == gt_mask) & (predicted_mask != GC_BGD)).astype(int)
     intersection_size = np.count_nonzero(fg_intersection)
     jaccard = intersection_size / (intersection_size + (total_pixels - cnt))
     
@@ -405,7 +443,7 @@ def parse():
     parser.add_argument('--input_name', type=str, default='banana1', help='name of image from the course files')
     parser.add_argument('--eval', type=int, default=1, help='calculate the metrics')
     parser.add_argument('--input_img_path', type=str, default='', help='if you wish to use your own img_path')
-    parser.add_argument('--use_file_rect', type=int, default=1, help='Read rect from course files')
+    parser.add_argument('--use_file_rect', type=str, default=1, help='Read rect from course files')
     parser.add_argument('--rect', type=str, default='1,1,100,100', help='if you wish change the rect (x,y,w,h')
     return parser.parse_args()
 
@@ -426,7 +464,7 @@ if __name__ == '__main__':
 
 
     img = cv2.imread(input_path)
-
+    #img = cv2.GaussianBlur(img, (5, 5), 0)
     # Run the GrabCut algorithm on the image and bounding box
     mask, bgGMM, fgGMM = grabcut(img, rect)
     mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY)[1]
@@ -445,3 +483,5 @@ if __name__ == '__main__':
     cv2.imshow('GrabCut Result', img_cut)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
+
