@@ -102,7 +102,25 @@ def main():
                 #Find the nearest intersection of the ray. This is the surface that will be
                 # seen in the image.
                 if isinstance(obj,Cube):
-                    a = 0
+                    #extract parameters
+                    cube_mid = obj.position
+                    edge_len = obj.scale
+                    min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+                    min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+                    max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+                    max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+                    t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
+                    t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
+                    t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
+                    t_enter = max(t_min_x,t_min_y,t_min_z)
+                    t_exit = min(t_max_x,t_max_y,t_max_z)
+                    if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0):
+                        #no intersection
+                        continue
+                    #there is an intersection, t=t_enter
+                    if (t_enter<=min_t):
+                        min_t = t_enter
+                        closest_surface = obj
                 elif isinstance(obj,Sphere):
                     O = obj.position
                     r = obj.radius
@@ -142,6 +160,7 @@ def main():
                     if t_plane<min_t:
                         min_t = t_plane
                         closest_surface = obj
+            #here we've got the closest surface saved together with the t_value
 
     #Compute the color of the surface:
         #Go over each light in the scene.
