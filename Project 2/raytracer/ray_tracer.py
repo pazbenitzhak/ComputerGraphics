@@ -165,10 +165,15 @@ def main():
     #Compute the color of the surface:
     for obj in objects:
         if (isinstance(obj,Cube) or isinstance(obj,Sphere) or isinstance(obj,InfinitePlane)):
+            mat_id = obj.material_index
             for light in objects:
                 #take only lights
                 if isinstance(light, Light):
-                    
+                    #output color =
+                    #(background color) · transparency
+                    #+(diffuse + specular) · (1 − transparency)
+                    #+(reflection color)
+
         #Go over each light in the scene.
         #Add the value it induces on the surface.
     #Find out whether the light hits the surface or not:
