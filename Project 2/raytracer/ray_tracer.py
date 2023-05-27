@@ -65,9 +65,9 @@ def main():
 
     # Parse the scene file
     camera, scene_settings, objects = parse_scene_file(args.scene_file)
-    print(objects)
     image_array = np.zeros((args.height, args.width, 3))
     rays_array = np.zeros((args.height, args.width),dtype=object)
+    associated_surfaces = np.zeros((args.height, args.width),dtype=object)
     #need to use np.vectorize on the lambda expression in order to insert it into the rays_array
 
     #extract parameters and name them in the same way as in the slides
@@ -88,12 +88,12 @@ def main():
             #for pixel (i,j)
             #Shoot a ray through each pixel in the image
             #Discover the location of the pixel on the camera’s screen (using camera parameters).
-            p = p_c+tuple((j-np.floor(rx/2))*R*np.array(v_right)-\
-                (i-np.floor(ry/2))*R*np.array(v_up_tilda))
+            p = tuple(np.array(p_c)+((j-np.floor(rx/2))*R*np.array(v_right)-\
+                (i-np.floor(ry/2))*R*np.array(v_up_tilda)))
             #Construct a ray from the camera through that pixel.
             ray = lambda t: p_0 + tuple(t*(np.array(p)-np.array(p_0)))
             V = tuple(np.array(p)-np.array(p_0))
-            rays_array[i][j] = np.vectorize(ray)
+            rays_array[i,j] = np.vectorize(ray)
             closest_surface = 0
             min_t = float('inf')
             for obj in objects:
@@ -154,15 +154,21 @@ def main():
                         #ray is parallel or nearly parallel to the plane - no intersection
                         continue
                     #there could still be an intersection
-                    t_plane = np.dot(N,plane_point-p_0)/dot_prod
+                    t_plane = np.dot(N,np.array(plane_point)-p_0)/dot_prod
                     if t_plane<0: #no intersection
                         continue
                     if t_plane<min_t:
                         min_t = t_plane
                         closest_surface = obj
             #here we've got the closest surface saved together with the t_value
-
+            associated_surfaces[i,j] = closest_surface
     #Compute the color of the surface:
+    for obj in objects:
+        if (isinstance(obj,Cube) or isinstance(obj,Sphere) or isinstance(obj,InfinitePlane)):
+            for light in objects:
+                #take only lights
+                if isinstance(light, Light):
+                    
         #Go over each light in the scene.
         #Add the value it induces on the surface.
     #Find out whether the light hits the surface or not:
