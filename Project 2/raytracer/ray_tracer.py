@@ -64,8 +64,49 @@ def main():
 
     # Parse the scene file
     camera, scene_settings, objects = parse_scene_file(args.scene_file)
+    image_array = np.zeros((args.height, args.width, 3))
+    rays_array = np.zeros((args.height, args.width))
+    #need to use np.vectorize on the lambda expression in order to insert it into the rays_array
 
+    #extract parameters and name them in the same way as in the slides
+    p_0 = camera.position
+    w = camera.screen_width
+    d = camera.screen_distance
+    v_to = camera.look_at
+    v_up = camera.up_vector
+    rx, ry = args.width, args.height
+    #image center
+    p_c = tuple(p_0+d*np.array(v_to))
+    # do the cross product and normalize
+    v_right = tuple(np.cross(np.array(v_to),np.array(v_up))/np.linalg.norm(np.cross(np.array(v_to),np.array(v_up))))
+    v_up_tilda = tuple(np.cross(np.array(v_right),np.array(v_to))/np.linalg.norm(np.cross(np.array(v_right),np.array(v_to))))
+    R = w/rx
+    for i in range(args.height):
+        for j in range(args.width):
+            #for pixel (i,j)
+            #Shoot a ray through each pixel in the image
+            #Discover the location of the pixel on the camera’s screen (using camera parameters).
+            p = p_c+np.tuple((j-np.floor(rx/2))*R*np.array(v_right))-\
+                np.tuple((i-np.floor(ry/2))*R*np.array(v_up_tilda))
+            #Construct a ray from the camera through that pixel.
+            ray = lambda t: p_0 + tuple(t*(np.array(p)-np.array(p_0)))
+            rays_array[i][j] = np.vectorize(ray)
     # TODO: Implement the ray tracer
+    #Check the intersection of the ray with all surfaces in the scene (you can add \
+    # optimizations such as BSP trees if you wish but they are not mandatory).
+    #Find the nearest intersection of the ray. This is the surface that will be
+    # seen in the image.
+    #Compute the color of the surface:
+        #Go over each light in the scene.
+        #Add the value it induces on the surface.
+    #Find out whether the light hits the surface or not:
+        #Shoot rays from the light towards the surface
+        #Find whether the ray intersects any other surfaces before the required
+        # surface - if so, the surface is occluded from the light and the light does
+        # not affect it (or partially affects it because of the shadow intensity parameter).
+    #Produce soft shadows, as explained below:
+        #Shoot several rays from the proximity of the light to the surface.
+        #Find out how many of them hit the required surface
 
     # Dummy result
     image_array = np.zeros((500, 500, 3))
