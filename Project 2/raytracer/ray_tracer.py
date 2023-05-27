@@ -10,6 +10,7 @@ from surfaces.cube import Cube
 from surfaces.infinite_plane import InfinitePlane
 from surfaces.sphere import Sphere
 
+EPSILON = 0.001
 
 def parse_scene_file(file_path):
     objects = []
@@ -64,8 +65,9 @@ def main():
 
     # Parse the scene file
     camera, scene_settings, objects = parse_scene_file(args.scene_file)
+    print(objects)
     image_array = np.zeros((args.height, args.width, 3))
-    rays_array = np.zeros((args.height, args.width))
+    rays_array = np.zeros((args.height, args.width),dtype=object)
     #need to use np.vectorize on the lambda expression in order to insert it into the rays_array
 
     #extract parameters and name them in the same way as in the slides
@@ -86,16 +88,61 @@ def main():
             #for pixel (i,j)
             #Shoot a ray through each pixel in the image
             #Discover the location of the pixel on the camera’s screen (using camera parameters).
-            p = p_c+np.tuple((j-np.floor(rx/2))*R*np.array(v_right))-\
-                np.tuple((i-np.floor(ry/2))*R*np.array(v_up_tilda))
+            p = p_c+tuple((j-np.floor(rx/2))*R*np.array(v_right)-\
+                (i-np.floor(ry/2))*R*np.array(v_up_tilda))
             #Construct a ray from the camera through that pixel.
             ray = lambda t: p_0 + tuple(t*(np.array(p)-np.array(p_0)))
+            V = tuple(np.array(p)-np.array(p_0))
             rays_array[i][j] = np.vectorize(ray)
-    # TODO: Implement the ray tracer
-    #Check the intersection of the ray with all surfaces in the scene (you can add \
-    # optimizations such as BSP trees if you wish but they are not mandatory).
-    #Find the nearest intersection of the ray. This is the surface that will be
-    # seen in the image.
+            closest_surface = 0
+            min_t = float('inf')
+            for obj in objects:
+                #Check the intersection of the ray with all surfaces in the scene (you can add \
+                # optimizations such as BSP trees if you wish but they are not mandatory).
+                #Find the nearest intersection of the ray. This is the surface that will be
+                # seen in the image.
+                if isinstance(obj,Cube):
+                    a = 0
+                elif isinstance(obj,Sphere):
+                    O = obj.position
+                    r = obj.radius
+                    #need to solve a quadratic equation
+                    a = 1
+                    b = 2*np.dot(np.array(V),(np.array(p_0)-np.array(O)))
+                    c = np.sqrt((p_0[0]-O[0])**2+(p_0[1]-O[1])**2+(p_0[2]-O[2])**2)-r**2
+                    delta = b**2-4*a*c
+                    if (delta<0): #a complex number - ray does not intersect with the sphere
+                        continue
+                    t1 = (-b+np.sqrt(delta))/(2*a)
+                    t2 = (-b-np.sqrt(delta))/(2*a)
+                    sphere_min_t = min(t1,t2)
+                    if (sphere_min_t<=min_t):
+                        #need to update closest surface
+                        min_t =sphere_min_t
+                        closest_surface = obj
+                elif isinstance(obj, InfinitePlane):
+                    #extract parameters
+                    N = np.array(obj.normal)
+                    d_plane = obj.offset
+                    #need to find a point on the plane
+                    if N[2]!=0:
+                        plane_point = (0,0,-d_plane/N[2])
+                    elif N[1]!=0:
+                        plane_point = (0,-d_plane/N[1],0)
+                    elif N[0]!=0:
+                        plane_point = (-d_plane/N[0],0,0)
+                    dot_prod = np.dot(np.array(V),np.array(N))
+                    if (np.abs(dot_prod)<EPSILON):
+                        #ray is parallel or nearly parallel to the plane - no intersection
+                        continue
+                    #there could still be an intersection
+                    t_plane = np.dot(N,plane_point-p_0)/dot_prod
+                    if t_plane<0: #no intersection
+                        continue
+                    if t_plane<min_t:
+                        min_t = t_plane
+                        closest_surface = obj
+
     #Compute the color of the surface:
         #Go over each light in the scene.
         #Add the value it induces on the surface.
@@ -108,8 +155,6 @@ def main():
         #Shoot several rays from the proximity of the light to the surface.
         #Find out how many of them hit the required surface
 
-    # Dummy result
-    image_array = np.zeros((500, 500, 3))
 
     # Save the output image
     save_image(image_array)
