@@ -12,7 +12,7 @@ from surfaces.sphere import Sphere
 import random
 import time
 
-EPSILON = 0.001
+EPSILON = 0.00001
 objects_lst = []
 materials_lst = []
 surfaces_lst = [] 
@@ -73,7 +73,7 @@ def main():
     # Parse the scene file
     camera, scene_settings, objects = parse_scene_file(args.scene_file)
     objects_lst = objects
-    image_array = np.zeros((args.height, args.width, 3))
+    image_array = np.zeros((args.height, args.width, 3),dtype=np.uint8)
     #rays_array = np.zeros((args.height, args.width),dtype=object)
     #associated_surfaces = np.zeros((args.height, args.width),dtype=object)
     #need to use np.vectorize on the lambda expression in order to insert it into the rays_array
@@ -85,17 +85,20 @@ def main():
     p_0_cam = np.array(camera.position)
     w = camera.screen_width
     d = camera.screen_distance
-    v_to = (np.array(camera.look_at)-np.array(camera.position))/np.linalg.norm(np.array(camera.look_at)-np.array(camera.position))
+    v_to_unnorm = np.array(camera.look_at)-np.array(camera.position)
+    v_to = v_to_unnorm/find_norm(v_to_unnorm)
     #print("v_to: " +str(v_to))
-    v_up = np.array(camera.up_vector)/np.linalg.norm(np.array(camera.up_vector)) #TODO: find a perpendicular vector
+    v_up = np.array(camera.up_vector)/find_norm(np.array(camera.up_vector)) #TODO: find a perpendicular vector
     #print("v_up: " +str(v_up))
     #TODO: check if we should keep it that way or do it according to v_to
     rx, ry = args.width, args.height
     #image center
     p_c = p_0_cam+d*v_to
     # do the cross product and normalize
-    v_right = np.cross(v_to,v_up)/np.linalg.norm(np.cross(v_to,v_up))
-    v_up_tilda = np.cross(v_to,v_right)/np.linalg.norm(np.cross(v_to,v_right))
+    v_right_unnorm = np.cross(v_to,v_up)
+    v_right = v_right_unnorm/find_norm(v_right_unnorm)
+    v_up_tilda_unnorm = np.cross(v_to,v_right)
+    v_up_tilda = v_up_tilda_unnorm/find_norm(v_up_tilda_unnorm)
     R = w/rx
     #TODO: ADDITION
     screen_height = (float(args.height)/float(args.width))*w
@@ -104,8 +107,10 @@ def main():
     siny = -1*v_to[0]/cosx
     cosy = v_to[2]/cosx
     M = np.array([[cosy,0,siny],[-1*sinx*siny,cosx,sinx*cosy],[-1*cosx*siny,-1*sinx,cosx*cosy]])
-    v_x = (np.array([1,0,0]) @ M)/np.linalg.norm(np.array([1,0,0]) @ M)
-    v_y = (np.array([0,-1,0]) @ M)/np.linalg.norm(np.array([0,-1,0]) @ M)
+    v_x_unnorm = np.array([1,0,0]) @ M
+    v_x = v_x_unnorm/find_norm(v_x_unnorm)
+    v_y_unnorm = np.array([0,-1,0]) @ M
+    v_y = v_y_unnorm/find_norm(v_y_unnorm)
     p_0 = p_c-0.5*w*v_x-0.5*screen_height*v_y
     #TODO: ADDITION END
     count = 0
@@ -129,7 +134,8 @@ def main():
              #   (i-np.floor(ry/2))*R*v_up_tilda
 
             #Construct a ray from the camera through that pixel.
-            V = (p-p_0_cam)/np.linalg.norm(p-p_0_cam)
+            V_unnorm = (p-p_0_cam)
+            V = V_unnorm/find_norm(V_unnorm)
             #TODO: ADDITION END
             ray = lambda t: p_0_cam + t*V
             #rays_array[i,j] = np.vectorize(ray)
@@ -177,6 +183,7 @@ def find_intersection(p_0,V):
         # seen in the image.
         if isinstance(surf,Cube):
             #extract parameters
+            #TODO: check compatibility
             cube_mid = np.array(surf.position)
             edge_len = surf.scale
             min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
@@ -192,7 +199,7 @@ def find_intersection(p_0,V):
                 #no intersection
                 continue
             #there is an intersection, t=t_enter
-            if (t_enter<=min_t):
+            if (t_enter<min_t):
                 min_t = t_enter
                 closest_surface = surf
         elif isinstance(surf,Sphere):
@@ -200,7 +207,7 @@ def find_intersection(p_0,V):
             O = np.array(surf.position)
             r = surf.radius
             L = O-p_0
-            t_ca = np.dot(L,V)/(np.linalg.norm(L)*np.linalg.norm(V))
+            t_ca = np.dot(L,V)
             if t_ca<0:
                 continue
             d_sq = np.sum(np.square(L))-np.square(t_ca)
@@ -211,7 +218,7 @@ def find_intersection(p_0,V):
             if (sphere_min_t<=0):
                 continue
             #print("sphere instersect")
-            if (sphere_min_t<=min_t):
+            if (sphere_min_t<min_t):
                 #need to update closest surface
                 min_t =sphere_min_t
                 closest_surface = surf
@@ -253,7 +260,7 @@ def find_intersection(p_0,V):
             t_plane = (d_plane-p0_dot_N)/V_dot_N
             if t_plane<=0:
                 continue
-            if t_plane<=min_t:
+            if t_plane<min_t:
                 min_t = t_plane
                 closest_surface = surf
 
@@ -310,7 +317,7 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
     #print("reflection_color: "+str(reflection_color))
     phong_spec_efficiency = materials_lst[mat_id-1].shininess
     #p is the ray's intersection with the surface/pixel's location in the real world
-    N = find_surface_normal(surface,p_0_cam,intersect_point)
+    N = find_surface_normal(surface,intersect_point)
     diff_color = np.array((0.0,0.0,0.0))
     spec_color = np.array((0.0,0.0,0.0))
     color = np.array((0.0,0.0,0.0))
@@ -321,6 +328,7 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
         light_specular_intensity = light.specular_intensity
         #it's a light
         light_intensity = find_light_intensity(light,intersect_point,scene,surface)
+        #TODO: STOP
         #print("light_intensity: " +str(light_intensity))
         I_L = light_intensity*light_color
         #print("I_L: " +str(I_L))
@@ -377,38 +385,30 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
     #print("final color: " +str(color) + ", depth = " +str(depth))
     return np.array((min(color[0],1.0),min(color[1],1.0),min(color[2],1.0)))
 
-def find_surface_normal(surface,p_0_cam,intersect_point):
+def find_surface_normal(surface,intersect_point):
     if isinstance(surface,InfinitePlane):
-        return np.array(surface.normal)/np.linalg.norm(np.array(surface.normal))
+        return np.array(surface.normal)/find_norm(np.array(surface.normal))
     if isinstance(surface,Sphere):
         sphere_center = np.array(surface.position)
-        return (intersect_point-sphere_center)/np.linalg.norm(intersect_point-sphere_center)
+        norm_unnorm = intersect_point-sphere_center
+        return norm_unnorm/find_norm(norm_unnorm)
     if isinstance(surface,Cube):
         """PREV_IMP"""
         cube_center = np.array(surface.position)
         edge_len = surface.scale
         #need to find which plane of the six edges includes the intersection point
         #divide to cases
-        #plane's equation is x = d
+        #plane's equation is x = d or x = -d
         d = cube_center[0]-edge_len/2
-        if (intersect_point[0]-d<EPSILON):
+        if (abs(intersect_point[0]-d)<EPSILON or abs(intersect_point[0]+d)<EPSILON):
             return np.array((1.0,0.0,0.0))
-        #plane's equation is x = -d
-        if (intersect_point[0]+d<EPSILON):
-            return np.array((1.0,0.0,0.0))
-        #plane's equation is y = d
+        #plane's equation is y = d or y = -d
         d = cube_center[1]-edge_len/2
-        if (intersect_point[1]-d<EPSILON):
+        if (abs(intersect_point[1]-d)<EPSILON or abs(intersect_point[1]+d)<EPSILON):
             return np.array((0.0,1.0,0.0))
-        #plane's equation is y = -d
-        if (intersect_point[1]+d<EPSILON):
-            return np.array((0.0,1.0,0.0))
-        #plane's equation is z = d
+        #plane's equation is z = d or z = -d
         d = cube_center[2]-edge_len/2
-        if (intersect_point[2]*1-d<EPSILON):
-            return np.array((0.0,0.0,1.0))
-        #plane's equation is z = -d
-        if (intersect_point[2]*1+d<EPSILON):
+        if (abs(intersect_point[2]*1-d)<EPSILON or abs(intersect_point[2]*1+d)<EPSILON):
             return np.array((0.0,0.0,1.0))
     
 def find_ray_exit_point(p,V,surface,camera):
@@ -455,7 +455,8 @@ def find_light_intensity(light,p,scene,surface):
     light_shadow_intensity = light.shadow_intensity
     light_radius = light.radius
     #shoot a ray from the light position to the surface point
-    ray_vector = (p-light_pos)/np.linalg.norm(p-light_pos)
+    ray_vector_unnorm = p-light_pos
+    ray_vector = ray_vector_unnorm/find_norm(ray_vector_unnorm)
     #find a plane perpendicular to the ray that includes the light position
     #the normal is the same as the ray_vector
     d = light_pos[0]*ray_vector[0]+light_pos[1]*ray_vector[1]+light_pos[2]*ray_vector[2]
@@ -470,18 +471,20 @@ def find_light_intensity(light,p,scene,surface):
     elif (ray_vector[1]!=0):
         plane_point_x = 10*random.random()
         plane_point_z = 20*random.random()
-        plane_point = np.array((plane_point_x,(d-plane_point_x*ray_vector[0]-plane_point_z*ray_vector[2])/ray_vector[1]),\
+        plane_point = np.array((plane_point_x,(d-plane_point_x*ray_vector[0])/ray_vector[1]),\
                                 plane_point_z)
         #plane_point = np.array((0.0,-d/ray_vector[1],0.0))
     elif (ray_vector[0]!=0):
         plane_point_y = 10*random.random()
         plane_point_z = 20*random.random()
-        plane_point = np.array(((d-plane_point_y*ray_vector[1]-plane_point_z*ray_vector[2])/ray_vector[0]),\
+        plane_point = np.array(d/ray_vector[0],\
                                 plane_point_y,plane_point_z)
         #plane_point = np.array((-d/ray_vector[0],0.0,0.0))
     #now we have a point, let's find parametric representation of the plane
-    first_direc = (plane_point-light_pos)/np.linalg.norm(light_pos-plane_point)
-    second_direc = np.cross(first_direc,ray_vector)/np.linalg.norm(np.cross(first_direc,ray_vector))
+    first_direc_unnorm = plane_point-light_pos
+    first_direc = first_direc_unnorm/find_norm(first_direc_unnorm)
+    second_direc_unnorm = np.cross(first_direc,ray_vector)
+    second_direc = second_direc_unnorm/find_norm(second_direc_unnorm)
     first_rect_point = light_pos-0.5*light_radius*(first_direc+second_direc)
     #first_rect_point = np.array((light_pos[0]-0.5*light_radius*(first_direc[0]+second_direc[0]),\
     #                    light_pos[1]-0.5*light_radius*(first_direc[1]+second_direc[1]),\
@@ -490,14 +493,16 @@ def find_light_intensity(light,p,scene,surface):
     hit_count = 0
     for i in range(shadow_rays_num):
         sample_point = np.copy(first_rect_point)
-        sample_point = sample_point+(i*light_radius/shadow_rays_num)*first_direc
+        sample_point = sample_point+(i*(light_radius/shadow_rays_num))*second_direc
         for j in range(shadow_rays_num):
-            sample_point_in_loop = sample_point+(random.random()*light_radius/shadow_rays_num)*first_direc
-            sample_point_in_loop = sample_point+(random.random()*light_radius/shadow_rays_num)*second_direc
-            shadow_ray = (p-sample_point_in_loop)/np.linalg.norm(p-sample_point_in_loop)
+            sample_point_in_loop = np.copy(sample_point)
+            sample_point_in_loop += (random.random()*(light_radius/shadow_rays_num))*first_direc
+            sample_point_in_loop += (random.random()*(light_radius/shadow_rays_num))*second_direc
+            shadow_ray_unnorm = p-sample_point_in_loop
+            shadow_ray = shadow_ray_unnorm/find_norm(shadow_ray_unnorm)
             hit_count+=calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface)
 
-    hit_rate = hit_count/(shadow_rays_num**2)
+    hit_rate = hit_count/(float(shadow_rays_num)*shadow_rays_num)
     return (1-light_shadow_intensity)+light_shadow_intensity*hit_rate
 
 def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
@@ -524,7 +529,7 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
                 max_z-sample_point_in_loop[2]/shadow_ray[2]
             t_enter = max(t_min_x,t_min_y,t_min_z)
             t_exit = min(t_max_x,t_max_y,t_max_z)
-            if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0):
+            if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
                 #no intersection
                 continue
             #there is an intersection, t=t_enter
@@ -535,6 +540,22 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
                 obj_ind = i
 
         elif isinstance(obj,Sphere):
+            #geometric approach
+            O = np.array(obj.position)
+            r = obj.radius
+            L = O-sample_point_in_loop
+            t_ca = np.dot(L,shadow_ray)
+            if t_ca<0:
+                continue
+            d_sq = np.sum(np.square(L))-np.square(t_ca)
+            if d_sq > r**2:
+                continue
+            t_hc = np.sqrt(r**2-d_sq)
+            sphere_min_t = t_ca-t_hc
+            if (sphere_min_t<=0):
+                continue
+            
+            """prev_imp
             O = np.array(obj.position)
             r = obj.radius
             #need to solve a quadratic equation
@@ -547,6 +568,7 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
             t1 = (-b+np.sqrt(delta))/(2*a)
             t2 = (-b-np.sqrt(delta))/(2*a)
             sphere_min_t = min(t1,t2)
+            """
             t_list[i] = sphere_min_t
             if (isinstance(surface, Sphere) and \
                 obj.position==surface.position and obj.radius==surface.radius and \
@@ -554,6 +576,15 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
                 obj_ind = i
 
         elif isinstance(obj, InfinitePlane):
+            N = np.array(obj.normal)
+            d_plane = obj.offset
+            p0_dot_N = np.dot(sample_point_in_loop,N)
+            V_dot_N = np.dot(shadow_ray,N)
+            t_plane = (d_plane-p0_dot_N)/V_dot_N
+            if t_plane<=0:
+                continue
+
+            """prev_imp
             #extract parameters
             N = np.array(obj.normal)
             d_plane = obj.offset
@@ -570,8 +601,9 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
                 continue
             #there could still be an intersection
             t_plane = np.dot(N,plane_point-sample_point_in_loop)/dot_prod
-            if t_plane<0: #no intersection
+            if t_plane<=0: #no intersection
                 continue
+                """
             t_list[i] = t_plane
             if (isinstance(surface, InfinitePlane) and \
                 obj.normal==surface.normal and obj.offset==surface.offset and \
@@ -610,6 +642,7 @@ def init_lists():
     lights_lst = light_lst
     return
 
-
+def find_norm(vec):
+    return np.sqrt(np.square(vec[0])+np.square(vec[1])+np.square(vec[2]))
 if __name__ == '__main__':
     main()
