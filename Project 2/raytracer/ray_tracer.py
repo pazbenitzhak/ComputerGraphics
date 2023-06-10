@@ -148,7 +148,7 @@ def main():
             #Compute the color of the surface:
             #TODO: ADDITION
             intersect_point = ray(min_t)
-            color = find_color(p_0_cam,intersect_point,V,closest_surface,scene_settings,1,camera)
+            color = find_color(intersect_point,V,closest_surface,scene_settings,1,camera)
             #TODO: ADDITION END
 
 
@@ -292,7 +292,7 @@ def find_intersection(p_0,V):
         #print("Sphere chosen")
     return closest_surface, min_t
 
-def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
+def find_color(intersect_point,V,surface,scene,depth,camera):
     #Add the value it induces on the surface.
     #Find out whether the light hits the surface or not:
     #Shoot rays from the light towards the surface
@@ -333,13 +333,14 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
         I_L = light_intensity*light_color
         #print("I_L: " +str(I_L))
         #create a ray from the light to the object
-        L = (light_pos-intersect_point)/np.linalg.norm(light_pos-intersect_point)
-        N_dot_L = max(0,np.dot(L,N)/(np.linalg.norm(N)*np.linalg.norm(L)))
+        L_unnorm = light_pos-intersect_point
+        L = L_unnorm/find_norm(L_unnorm)
+        N_dot_L = max(0,np.dot(L,N))
         #print(np.dot(N,L)/(np.linalg.norm(N)*np.linalg.norm(L)))
         #print("N_dot_L: " +str(N_dot_L))
-
-        R = (2*N_dot_L*N-L)/np.linalg.norm(2*N_dot_L*N-L)
-        R_dot_V = max(0,np.dot(R,-1*V)/(np.linalg.norm(V)*np.linalg.norm(R)))
+        R_unnorm = 2*N_dot_L*N-L
+        R = R_unnorm/find_norm(R_unnorm)
+        R_dot_V = max(0,np.dot(R,-1*V))
         #TODO: check if R_V or V_R
 
         #calculate diffuse_color
@@ -350,10 +351,10 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
 
         #calculate specular color
         spec_color += I_L*specular_color*light_specular_intensity*\
-                            R_dot_V**phong_spec_efficiency
+                            (R_dot_V**phong_spec_efficiency)
         #print("spec_color: " +str(spec_color))
-        color += (1-transparency)*(diff_color+spec_color)
-        #print("color: " +str(color))
+    color += (1-transparency)*(diff_color+spec_color)
+    #print("color: " +str(color))
 
     #print("max recursion:" +str(scene.max_recursions))
     #check whether we've already reached our depth maximum. If so - return the color
@@ -361,11 +362,12 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
     if (depth<scene.max_recursions):
         #need to handle reflection - every time a ray hits the surface, it reflects back the light
         #let's consruct the R vector
-        V_dot_N = np.dot(V,N)/(np.linalg.norm(N)*np.linalg.norm(V))
-        R_reflect = (V-2*V_dot_N*N)/np.linalg.norm(V-2*V_dot_N*N)
+        V_dot_N = np.dot(V,N)
+        R_reflect_unnorm = V-2*V_dot_N*N
+        R_reflect = R_reflect_unnorm/find_norm(R_reflect_unnorm)
         closest_next_surface, min_t_to_next_surface = find_intersection(intersect_point,R_reflect)
         next_p = intersect_point+min_t_to_next_surface*R_reflect
-        reflect_color = find_color(p_0_cam,next_p,R_reflect,closest_next_surface,scene,depth+1,camera)
+        reflect_color = find_color(next_p,R_reflect,closest_next_surface,scene,depth+1,camera)
         color += reflect_color*reflection_color
         #print("color: " +str(color) + ", depth: " +str(depth))
 
@@ -375,7 +377,7 @@ def find_color(p_0_cam,intersect_point,V,surface,scene,depth,camera):
             exit_point = find_ray_exit_point(intersect_point,V,surface,camera)
             closest_next_surface, min_t_to_next_surface = find_intersection(exit_point,V)
             next_p = exit_point+min_t_to_next_surface*V
-            transp_color = find_color(p_0_cam,next_p,V,closest_next_surface,scene,depth,camera)
+            transp_color = find_color(next_p,V,closest_next_surface,scene,depth,camera)
             
             color += transparency*transp_color
             #print("color: " +str(color) + ", depth: " +str(depth))
