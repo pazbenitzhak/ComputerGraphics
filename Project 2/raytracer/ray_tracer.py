@@ -17,6 +17,10 @@ objects_lst = []
 materials_lst = []
 surfaces_lst = [] 
 lights_lst = []
+camera = 0
+scene_settings = 0
+shadow = 0
+out_img = ""
 
 def parse_scene_file(file_path):
     objects = []
@@ -55,10 +59,11 @@ def parse_scene_file(file_path):
 
 
 def save_image(image_array):
+    global out_img
     image = Image.fromarray(np.uint8(image_array))
 
     # Save the image to a file
-    image.save("scenes/Spheres.png")
+    image.save(out_img)
 
 
 def main():
@@ -67,13 +72,16 @@ def main():
     parser.add_argument('output_image', type=str, help='Name of the output image file')
     parser.add_argument('--width', type=int, default=500, help='Image width')
     parser.add_argument('--height', type=int, default=500, help='Image height')
+    parser.add_argument('--shadow', type=str, default='y', help='Run with Shadow Transparency Check')
     args = parser.parse_args()
 
-    global objects_lst, materials_lst, surfaces_lst, lights_lst
+    global objects_lst, materials_lst, surfaces_lst, lights_lst, camera, scene_settings, shadow, out_img
     # Parse the scene file
     camera, scene_settings, objects = parse_scene_file(args.scene_file)
     objects_lst = objects
     image_array = np.zeros((args.height, args.width, 3),dtype=np.uint8)
+    shadow = args.shadow
+    out_img = args.output_image
     #rays_array = np.zeros((args.height, args.width),dtype=object)
     #associated_surfaces = np.zeros((args.height, args.width),dtype=object)
     #need to use np.vectorize on the lambda expression in order to insert it into the rays_array
@@ -148,7 +156,7 @@ def main():
             #Compute the color of the surface:
             #TODO: ADDITION
             intersect_point = ray(min_t)
-            color = find_color(intersect_point,V,closest_surface,scene_settings,1,camera)
+            color = find_color(intersect_point,V,closest_surface,1)
             #TODO: ADDITION END
 
 
@@ -292,7 +300,7 @@ def find_intersection(p_0,V):
         #print("Sphere chosen")
     return closest_surface, min_t
 
-def find_color(intersect_point,V,surface,scene,depth,camera):
+def find_color(intersect_point,V,surface,depth):
     #Add the value it induces on the surface.
     #Find out whether the light hits the surface or not:
     #Shoot rays from the light towards the surface
@@ -304,6 +312,8 @@ def find_color(intersect_point,V,surface,scene,depth,camera):
     #+(diffuse + specular) · (1 − transparency)
     #+(reflection color)
     #print("depth = " +str(depth))
+    global camera, scene_settings
+    scene = scene_settings
     if surface==0:
         #return background color if the original ray does not intersect any surface
         #print("background color: "+str(scene.background_color))
@@ -327,7 +337,7 @@ def find_color(intersect_point,V,surface,scene,depth,camera):
         light_color = np.array(light.color)
         light_specular_intensity = light.specular_intensity
         #it's a light
-        light_intensity = find_light_intensity(light,intersect_point,scene,surface)
+        light_intensity = find_light_intensity(light,intersect_point,surface)
         #TODO: STOP
         #print("light_intensity: " +str(light_intensity))
         I_L = light_intensity*light_color
@@ -367,17 +377,17 @@ def find_color(intersect_point,V,surface,scene,depth,camera):
         R_reflect = R_reflect_unnorm/find_norm(R_reflect_unnorm)
         closest_next_surface, min_t_to_next_surface = find_intersection(intersect_point,R_reflect)
         next_p = intersect_point+min_t_to_next_surface*R_reflect
-        reflect_color = find_color(next_p,R_reflect,closest_next_surface,scene,depth+1,camera)
+        reflect_color = find_color(next_p,R_reflect,closest_next_surface,depth+1)
         color += reflect_color*reflection_color
         #print("color: " +str(color) + ", depth: " +str(depth))
 
         #print("transparency: " +str(transparency))
         if transparency!=0: #the material is somewhat transparent and not opaque
             #need to calculate reflections
-            exit_point = find_ray_exit_point(intersect_point,V,surface,camera)
+            exit_point = find_ray_exit_point(intersect_point,V,surface)
             closest_next_surface, min_t_to_next_surface = find_intersection(exit_point,V)
             next_p = exit_point+min_t_to_next_surface*V
-            transp_color = find_color(next_p,V,closest_next_surface,scene,depth,camera)
+            transp_color = find_color(next_p,V,closest_next_surface,depth)
             
             color += transparency*transp_color
             #print("color: " +str(color) + ", depth: " +str(depth))
@@ -413,7 +423,8 @@ def find_surface_normal(surface,intersect_point):
         if (abs(intersect_point[2]*1-d)<EPSILON or abs(intersect_point[2]*1+d)<EPSILON):
             return np.array((0.0,0.0,1.0))
     
-def find_ray_exit_point(p,V,surface,camera):
+def find_ray_exit_point(p,V,surface):
+    global camera
     p_0 = np.array(camera.position)
     if isinstance(surface, InfinitePlane):
         return p
@@ -448,11 +459,13 @@ def find_ray_exit_point(p,V,surface,camera):
         return p_0+t_exit*V
 
 
-def find_light_intensity(light,p,scene,surface):
+def find_light_intensity(light,p,surface):
     #Produce soft shadows, as explained below:
         #Shoot several rays from the proximity of the light to the surface.
         #Find out how many of them hit the required surface
     #extract light parameters
+    global scene_settings, shadow
+    scene = scene_settings
     light_pos = np.array(light.position)
     light_shadow_intensity = light.shadow_intensity
     light_radius = light.radius
@@ -502,7 +515,10 @@ def find_light_intensity(light,p,scene,surface):
             sample_point_in_loop += (random.random()*(light_radius/shadow_rays_num))*second_direc
             shadow_ray_unnorm = p-sample_point_in_loop
             shadow_ray = shadow_ray_unnorm/find_norm(shadow_ray_unnorm)
-            hit_count+=calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface)
+            if shadow=='n':
+                hit_count+=1
+            else:
+                hit_count+=calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface)
 
     hit_rate = hit_count/(float(shadow_rays_num)*shadow_rays_num)
     return (1-light_shadow_intensity)+light_shadow_intensity*hit_rate
@@ -646,5 +662,6 @@ def init_lists():
 
 def find_norm(vec):
     return np.sqrt(np.square(vec[0])+np.square(vec[1])+np.square(vec[2]))
+
 if __name__ == '__main__':
     main()
