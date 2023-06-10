@@ -73,6 +73,8 @@ def main():
     parser.add_argument('--width', type=int, default=500, help='Image width')
     parser.add_argument('--height', type=int, default=500, help='Image height')
     parser.add_argument('--shadow', type=str, default='y', help='Run with Shadow Transparency Check')
+    #by default we run the function with the shadow transparency check. To run it without the check
+    #one must use --shadow n
     args = parser.parse_args()
 
     global objects_lst, materials_lst, surfaces_lst, lights_lst, camera, scene_settings, shadow, out_img
@@ -192,24 +194,59 @@ def find_intersection(p_0,V):
         if isinstance(surf,Cube):
             #extract parameters
             #TODO: check compatibility
+            #extract parameters
+
             cube_mid = np.array(surf.position)
             edge_len = surf.scale
-            min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
-            t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
-            t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
-            t_enter = max(t_min_x,t_min_y,t_min_z)
-            t_exit = min(t_max_x,t_max_y,t_max_z)
-            if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
+            planes_N = [np.array((1,0,0)),np.array((1,0,0)),np.array((0,1,0)),np.array((0,1,0)),\
+                      np.array((0,0,1)),np.array((0,0,1))]
+            planes_d = [cube_mid[0]+0.5*edge_len,cube_mid[0]-0.5*edge_len,cube_mid[1]+0.5*edge_len,cube_mid[1]-0.5*edge_len,\
+                        cube_mid[2]+0.5*edge_len,cube_mid[2]-0.5*edge_len]
+            planes_t = []
+            for i in range(6): #number of edges in a cube
+                N = planes_N[i]
+                d_plane = planes_d[i]
+                p0_dot_N = np.dot(p_0,N)
+                V_dot_N = np.dot(V,N)
+                t_plane = (d_plane-p0_dot_N)/V_dot_N
+                #if t_plane<=0:
+                #    t_plane = float("inf")
+                planes_t.append(t_plane)
+            t_x_min = min(planes_t[0],planes_t[1])
+            t_x_max = max(planes_t[0],planes_t[1])
+            t_y_min = min(planes_t[2],planes_t[3])
+            t_y_max = max(planes_t[2],planes_t[3])
+            if t_x_min>t_y_max or t_y_min>t_x_max:
                 #no intersection
                 continue
-            #there is an intersection, t=t_enter
+
+            t_min = max(t_x_min,t_y_min)
+            t_max = min(t_x_max,t_x_min)
+            t_z_min = min(planes_t[4],planes_t[5])
+            t_z_max = max(planes_t[4],planes_t[5])
+            if t_min>t_z_max or t_z_min>t_max:
+                #no_intersction
+                continue
+            t_enter = max(t_min,t_z_min)
             if (t_enter<min_t):
                 min_t = t_enter
                 closest_surface = surf
+            # min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+            # min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+            # max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+            # max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+            # t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
+            # t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
+            # t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
+            # t_enter = max(t_min_x,t_min_y,t_min_z)
+            # t_exit = min(t_max_x,t_max_y,t_max_z)
+            # if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
+            #     #no intersection
+                #continue
+            #there is an intersection, t=t_enter
+            #if (t_enter<min_t):
+             #   min_t = t_enter
+              #  closest_surface = surf
         elif isinstance(surf,Sphere):
             #geometric approach
             O = np.array(surf.position)
@@ -328,6 +365,9 @@ def find_color(intersect_point,V,surface,depth):
     phong_spec_efficiency = materials_lst[mat_id-1].shininess
     #p is the ray's intersection with the surface/pixel's location in the real world
     N = find_surface_normal(surface,intersect_point)
+    if isinstance(N,None):
+        print("intersection point: " +str(intersect_point))
+        print("depth: " +str(depth))
     diff_color = np.array((0.0,0.0,0.0))
     spec_color = np.array((0.0,0.0,0.0))
     color = np.array((0.0,0.0,0.0))
@@ -411,17 +451,24 @@ def find_surface_normal(surface,intersect_point):
         #need to find which plane of the six edges includes the intersection point
         #divide to cases
         #plane's equation is x = d or x = -d
-        d = cube_center[0]-edge_len/2
-        if (abs(intersect_point[0]-d)<EPSILON or abs(intersect_point[0]+d)<EPSILON):
+        d1 = cube_center[0]-edge_len/2
+        if (abs(intersect_point[0]-d1)<EPSILON or abs(intersect_point[0]+d1)<EPSILON):
             return np.array((1.0,0.0,0.0))
         #plane's equation is y = d or y = -d
-        d = cube_center[1]-edge_len/2
-        if (abs(intersect_point[1]-d)<EPSILON or abs(intersect_point[1]+d)<EPSILON):
+        d2 = cube_center[1]-edge_len/2
+        if (abs(intersect_point[1]-d2)<EPSILON or abs(intersect_point[1]+d2)<EPSILON):
             return np.array((0.0,1.0,0.0))
         #plane's equation is z = d or z = -d
         d = cube_center[2]-edge_len/2
         if (abs(intersect_point[2]*1-d)<EPSILON or abs(intersect_point[2]*1+d)<EPSILON):
             return np.array((0.0,0.0,1.0))
+        print(abs(intersect_point[0]-d1))
+        print(abs(intersect_point[0]+d1))
+        print(abs(intersect_point[1]-d2))
+        print(abs(intersect_point[1]+d2))
+        print(abs(intersect_point[2]-d))
+        print(abs(intersect_point[2]+d))
+        print("WHYYYYYYYY")
     
 def find_ray_exit_point(p,V,surface):
     global camera
@@ -446,17 +493,51 @@ def find_ray_exit_point(p,V,surface):
     
     if isinstance(surface, Cube):
         #extract parameters
+        # cube_mid = np.array(surface.position)
+        # edge_len = surface.scale
+        # min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+        # min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+        # max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+        # max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+        # t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
+        # t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
+        # t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
+        # t_exit = min(t_max_x,t_max_y,t_max_z)
+
+
         cube_mid = np.array(surface.position)
         edge_len = surface.scale
-        min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-        min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-        max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-        max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-        t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
-        t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
-        t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
-        t_exit = min(t_max_x,t_max_y,t_max_z)
-        return p_0+t_exit*V
+        planes_N = [np.array((1,0,0)),np.array((1,0,0)),np.array((0,1,0)),np.array((0,1,0)),\
+                    np.array((0,0,1)),np.array((0,0,1))]
+        planes_d = [cube_mid[0]+0.5*edge_len,cube_mid[0]-0.5*edge_len,cube_mid[1]+0.5*edge_len,cube_mid[1]-0.5*edge_len,\
+                    cube_mid[2]+0.5*edge_len,cube_mid[2]-0.5*edge_len]
+        planes_t = []
+        for i in range(6): #number of edges in a cube
+            N = planes_N[i]
+            d_plane = planes_d[i]
+            p0_dot_N = np.dot(p,N)
+            V_dot_N = np.dot(V,N)
+            t_plane = (d_plane-p0_dot_N)/V_dot_N
+            #if t_plane<=0:
+            #    t_plane = float("inf")
+            planes_t.append(t_plane)
+        t_x_min = min(planes_t[0],planes_t[1])
+        t_x_max = max(planes_t[0],planes_t[1])
+        t_y_min = min(planes_t[2],planes_t[3])
+        t_y_max = max(planes_t[2],planes_t[3])
+        if t_x_min>t_y_max or t_y_min>t_x_max:
+            #no intersection - doesn't make sense
+            return p
+
+        t_min = max(t_x_min,t_y_min)
+        t_max = min(t_x_max,t_x_min)
+        t_z_min = min(planes_t[4],planes_t[5])
+        t_z_max = max(planes_t[4],planes_t[5])
+        if t_min>t_z_max or t_z_min>t_max:
+            #no_intersction
+            return p
+        t_exit = max(t_min,t_z_min)
+        return p+t_exit*V
 
 
 def find_light_intensity(light,p,surface):
@@ -533,23 +614,55 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
         obj = surfaces_lst[i]
         if isinstance(obj,Cube):
             #extract parameters
+            # cube_mid = np.array(obj.position)
+            # edge_len = obj.scale
+            # min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+            # min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+            # max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
+            # max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
+            # t_min_x, t_max_x = min_x-sample_point_in_loop[0]/shadow_ray[0],\
+            #       max_x-sample_point_in_loop[0]/shadow_ray[0]
+            # t_min_y, t_max_y = min_y-sample_point_in_loop[1]/shadow_ray[1], \
+            #     max_y-sample_point_in_loop[1]/shadow_ray[1]
+            # t_min_z, t_max_z = min_z-sample_point_in_loop[2]/shadow_ray[2], \
+            #     max_z-sample_point_in_loop[2]/shadow_ray[2]
+            # t_enter = max(t_min_x,t_min_y,t_min_z)
+            # t_exit = min(t_max_x,t_max_y,t_max_z)
+            # if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
+            #     #no intersection
+            #     continue
             cube_mid = np.array(obj.position)
             edge_len = obj.scale
-            min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            t_min_x, t_max_x = min_x-sample_point_in_loop[0]/shadow_ray[0],\
-                  max_x-sample_point_in_loop[0]/shadow_ray[0]
-            t_min_y, t_max_y = min_y-sample_point_in_loop[1]/shadow_ray[1], \
-                max_y-sample_point_in_loop[1]/shadow_ray[1]
-            t_min_z, t_max_z = min_z-sample_point_in_loop[2]/shadow_ray[2], \
-                max_z-sample_point_in_loop[2]/shadow_ray[2]
-            t_enter = max(t_min_x,t_min_y,t_min_z)
-            t_exit = min(t_max_x,t_max_y,t_max_z)
-            if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
+            planes_N = [np.array((1,0,0)),np.array((1,0,0)),np.array((0,1,0)),np.array((0,1,0)),\
+                      np.array((0,0,1)),np.array((0,0,1))]
+            planes_d = [cube_mid[0]+0.5*edge_len,cube_mid[0]-0.5*edge_len,cube_mid[1]+0.5*edge_len,cube_mid[1]-0.5*edge_len,\
+                        cube_mid[2]+0.5*edge_len,cube_mid[2]-0.5*edge_len]
+            planes_t = []
+            for i in range(6): #number of edges in a cube
+                N = planes_N[i]
+                d_plane = planes_d[i]
+                p0_dot_N = np.dot(p_0,N)
+                V_dot_N = np.dot(V,N)
+                t_plane = (d_plane-p0_dot_N)/V_dot_N
+                #if t_plane<=0:
+                #    t_plane = float("inf")
+                planes_t.append(t_plane)
+            t_x_min = min(planes_t[0],planes_t[1])
+            t_x_max = max(planes_t[0],planes_t[1])
+            t_y_min = min(planes_t[2],planes_t[3])
+            t_y_max = max(planes_t[2],planes_t[3])
+            if t_x_min>t_y_max or t_y_min>t_x_max:
                 #no intersection
                 continue
+
+            t_min = max(t_x_min,t_y_min)
+            t_max = min(t_x_max,t_x_min)
+            t_z_min = min(planes_t[4],planes_t[5])
+            t_z_max = max(planes_t[4],planes_t[5])
+            if t_min>t_z_max or t_z_min>t_max:
+                #no_intersction
+                continue
+            t_enter = max(t_min,t_z_min)
             #there is an intersection, t=t_enter
             t_list[i] = t_enter
             if (isinstance(surface, Cube) and \
