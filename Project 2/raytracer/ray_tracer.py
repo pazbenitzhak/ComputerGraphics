@@ -221,7 +221,7 @@ def find_intersection(p_0,V):
                 continue
 
             t_min = max(t_x_min,t_y_min)
-            t_max = min(t_x_max,t_x_min)
+            t_max = min(t_x_max,t_y_max)
             t_z_min = min(planes_t[4],planes_t[5])
             t_z_max = max(planes_t[4],planes_t[5])
             if t_min>t_z_max or t_z_min>t_max:
@@ -365,7 +365,7 @@ def find_color(intersect_point,V,surface,depth):
     phong_spec_efficiency = materials_lst[mat_id-1].shininess
     #p is the ray's intersection with the surface/pixel's location in the real world
     N = find_surface_normal(surface,intersect_point)
-    if isinstance(N,None):
+    if N is None:
         print("intersection point: " +str(intersect_point))
         print("depth: " +str(depth))
     diff_color = np.array((0.0,0.0,0.0))
@@ -451,15 +451,15 @@ def find_surface_normal(surface,intersect_point):
         #need to find which plane of the six edges includes the intersection point
         #divide to cases
         #plane's equation is x = d or x = -d
-        d1 = cube_center[0]-edge_len/2
+        d1 = cube_center[0]-0.5*edge_len
         if (abs(intersect_point[0]-d1)<EPSILON or abs(intersect_point[0]+d1)<EPSILON):
             return np.array((1.0,0.0,0.0))
         #plane's equation is y = d or y = -d
-        d2 = cube_center[1]-edge_len/2
+        d2 = cube_center[1]-0.5*edge_len
         if (abs(intersect_point[1]-d2)<EPSILON or abs(intersect_point[1]+d2)<EPSILON):
             return np.array((0.0,1.0,0.0))
         #plane's equation is z = d or z = -d
-        d = cube_center[2]-edge_len/2
+        d = cube_center[2]-0.5*edge_len
         if (abs(intersect_point[2]*1-d)<EPSILON or abs(intersect_point[2]*1+d)<EPSILON):
             return np.array((0.0,0.0,1.0))
         print(abs(intersect_point[0]-d1))
@@ -530,7 +530,7 @@ def find_ray_exit_point(p,V,surface):
             return p
 
         t_min = max(t_x_min,t_y_min)
-        t_max = min(t_x_max,t_x_min)
+        t_max = min(t_x_max,t_y_max)
         t_z_min = min(planes_t[4],planes_t[5])
         t_z_max = max(planes_t[4],planes_t[5])
         if t_min>t_z_max or t_z_min>t_max:
@@ -656,7 +656,7 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
                 continue
 
             t_min = max(t_x_min,t_y_min)
-            t_max = min(t_x_max,t_x_min)
+            t_max = min(t_x_max,t_y_max)
             t_z_min = min(planes_t[4],planes_t[5])
             t_z_max = max(planes_t[4],planes_t[5])
             if t_min>t_z_max or t_z_min>t_max:
