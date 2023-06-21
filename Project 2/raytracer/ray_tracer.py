@@ -568,7 +568,6 @@ def find_light_intensity(light,p,surface):
     #the normal is the same as the ray_vector
     d = light_pos[0]*ray_vector[0]+light_pos[1]*ray_vector[1]+light_pos[2]*ray_vector[2]
     plane_point = np.array((0.0,0.0,0.0))
-    #TODO: check if we can just take zeros instead of randoms
     if (ray_vector[2]!=0):
         plane_point_x = 10*random.random()
         plane_point_y = 20*random.random()

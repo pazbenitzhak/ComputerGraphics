@@ -15,18 +15,16 @@ mtl		0.95	0.95	0.07	1	1	1	0.2	0.2	0	30	0
 pln		0	1	0	-1	4
 
 # Box: 		cx 	cy	cz	scale	mat_idx
-#box		0 	0	0	2	2
+box		0 	0	-0.5	2	2
 box		2 	1	-2	1	1
 
 # Sphere:	cx   	cy   	cz  	radius 	mat_idx
-#sph		-2	0	0	0.5	3
-#sph		-2	2	0	1	5
-sph		0	4	-1	0.7	6
+sph		1	2	-4	0.5	3
+sph		-2	2	-1	0.8	5
 
 
 
 # Lights:	px	py	pz	r	g	b	spec	shadow	width
-#lgt		0	3	0	0.5	0.5	0.3	1	0.9	1
 lgt		-3	3	-3	0.5	0.5	0.3	1	0.9	1
 lgt		-3	3	3	0.5	0.5	0.3	1	0.9	1
 lgt		3	3	-3	0.5	0.5	0.3	1	0.9	1
