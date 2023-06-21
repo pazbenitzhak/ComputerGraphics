@@ -440,10 +440,12 @@ def find_color(intersect_point,V,surface,depth):
 def find_surface_normal(surface,intersect_point):
     if isinstance(surface,InfinitePlane):
         return np.array(surface.normal)/find_norm(np.array(surface.normal))
+    
     if isinstance(surface,Sphere):
         sphere_center = np.array(surface.position)
         norm_unnorm = intersect_point-sphere_center
         return norm_unnorm/find_norm(norm_unnorm)
+    
     if isinstance(surface,Cube):
         """PREV_IMP"""
         cube_center = np.array(surface.position)
@@ -452,22 +454,31 @@ def find_surface_normal(surface,intersect_point):
         #divide to cases
         #plane's equation is x = d or x = -d
         d1 = cube_center[0]-0.5*edge_len
-        if (abs(intersect_point[0]-d1)<EPSILON or abs(intersect_point[0]+d1)<EPSILON):
+        if (abs(intersect_point[0]-d1)<EPSILON):
+            return np.array((1.0,0.0,0.0))
+        d2 = cube_center[0]+0.5*edge_len
+        if (abs(intersect_point[0]-d2)<EPSILON):
             return np.array((1.0,0.0,0.0))
         #plane's equation is y = d or y = -d
-        d2 = cube_center[1]-0.5*edge_len
-        if (abs(intersect_point[1]-d2)<EPSILON or abs(intersect_point[1]+d2)<EPSILON):
+        d3 = cube_center[1]-0.5*edge_len
+        if (abs(intersect_point[1]-d3)<EPSILON):
+            return np.array((0.0,1.0,0.0))
+        d4 = cube_center[1]+0.5*edge_len
+        if (abs(intersect_point[1]-d4)<EPSILON):
             return np.array((0.0,1.0,0.0))
         #plane's equation is z = d or z = -d
-        d = cube_center[2]-0.5*edge_len
-        if (abs(intersect_point[2]*1-d)<EPSILON or abs(intersect_point[2]*1+d)<EPSILON):
+        d5 = cube_center[2]-0.5*edge_len
+        if (abs(intersect_point[2]*1-d5)<EPSILON):
             return np.array((0.0,0.0,1.0))
-        print(abs(intersect_point[0]-d1))
-        print(abs(intersect_point[0]+d1))
-        print(abs(intersect_point[1]-d2))
-        print(abs(intersect_point[1]+d2))
-        print(abs(intersect_point[2]-d))
-        print(abs(intersect_point[2]+d))
+        d6 = cube_center[2]+0.5*edge_len
+        if (abs(intersect_point[2]*1-d6)<EPSILON):
+            return np.array((0.0,0.0,1.0))
+        #print(abs(intersect_point[0]-d1))
+        #print(abs(intersect_point[0]+d1))
+        #print(abs(intersect_point[1]-d2))
+        #print(abs(intersect_point[1]+d2))
+        #print(abs(intersect_point[2]-d))
+        #print(abs(intersect_point[2]+d))
         print("WHYYYYYYYY")
     
 def find_ray_exit_point(p,V,surface):
@@ -567,8 +578,8 @@ def find_light_intensity(light,p,surface):
     elif (ray_vector[1]!=0):
         plane_point_x = 10*random.random()
         plane_point_z = 20*random.random()
-        plane_point = np.array((plane_point_x,(d-plane_point_x*ray_vector[0])/ray_vector[1]),\
-                                plane_point_z)
+        plane_point = np.array((plane_point_x,(d-plane_point_x*ray_vector[0])/ray_vector[1],\
+                                plane_point_z))
         #plane_point = np.array((0.0,-d/ray_vector[1],0.0))
     elif (ray_vector[0]!=0):
         plane_point_y = 10*random.random()
@@ -641,8 +652,8 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
             for i in range(6): #number of edges in a cube
                 N = planes_N[i]
                 d_plane = planes_d[i]
-                p0_dot_N = np.dot(p_0,N)
-                V_dot_N = np.dot(V,N)
+                p0_dot_N = np.dot(sample_point_in_loop,N)
+                V_dot_N = np.dot(shadow_ray,N)
                 t_plane = (d_plane-p0_dot_N)/V_dot_N
                 #if t_plane<=0:
                 #    t_plane = float("inf")
