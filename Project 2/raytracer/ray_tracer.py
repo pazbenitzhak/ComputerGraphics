@@ -74,6 +74,8 @@ def main():
     parser.add_argument('--height', type=int, default=500, help='Image height')
     parser.add_argument('--shadow', type=str, default='y', help='Run with Shadow Transparency Check')
     #by default we run the function with the shadow transparency check. To run it without the check
+    #the code runs in default with the shadow transparency calculation.
+    #In order to avoid it, one must add '--shadow n' to the command.
     #one must use --shadow n
     args = parser.parse_args()
 
@@ -84,9 +86,6 @@ def main():
     image_array = np.zeros((args.height, args.width, 3),dtype=np.uint8)
     shadow = args.shadow
     out_img = args.output_image
-    #rays_array = np.zeros((args.height, args.width),dtype=object)
-    #associated_surfaces = np.zeros((args.height, args.width),dtype=object)
-    #need to use np.vectorize on the lambda expression in order to insert it into the rays_array
     init_lists()
     #measure time
     start_time = time.time()
@@ -97,10 +96,7 @@ def main():
     d = camera.screen_distance
     v_to_unnorm = np.array(camera.look_at)-np.array(camera.position)
     v_to = v_to_unnorm/find_norm(v_to_unnorm)
-    #print("v_to: " +str(v_to))
     v_up = np.array(camera.up_vector)/find_norm(np.array(camera.up_vector)) #TODO: find a perpendicular vector
-    #print("v_up: " +str(v_up))
-    #TODO: check if we should keep it that way or do it according to v_to
     rx, ry = args.width, args.height
     #image center
     p_c = p_0_cam+d*v_to
@@ -110,7 +106,7 @@ def main():
     v_up_tilda_unnorm = np.cross(v_to,v_right)
     v_up_tilda = v_up_tilda_unnorm/find_norm(v_up_tilda_unnorm)
     R = w/rx
-    #TODO: ADDITION
+    #adjust parameters of scene
     screen_height = (float(args.height)/float(args.width))*w
     sinx = -1*v_to[1]
     cosx = np.sqrt(1-sinx*sinx)
@@ -122,60 +118,40 @@ def main():
     v_y_unnorm = np.array([0,-1,0]) @ M
     v_y = v_y_unnorm/find_norm(v_y_unnorm)
     p_0 = p_c-0.5*w*v_x-0.5*screen_height*v_y
-    #TODO: ADDITION END
     count = 0
     #iterate over all the pixels
     for i in range(args.height):
-        #if count==1:
-         #       break
-        #TODO: ADDITION
+        #point on screen
         p = p_0+(i*(screen_height/args.height))*v_y
-        #TODO: ADDITION END
         for j in range(args.width):
-            #for pixel (i,j)
-            #if count==1:
-             #   break
-            if (count%1000==0):
-                print("count: "+str(count))
             #Shoot a ray through each pixel in the image
             #Discover the location of the pixel on the camera’s screen (using camera parameters).
-            #TODO: ADDITION
-            #p = p_c+(j-np.floor(rx/2))*R*v_right-\
-             #   (i-np.floor(ry/2))*R*v_up_tilda
-
             #Construct a ray from the camera through that pixel.
             V_unnorm = (p-p_0_cam)
             V = V_unnorm/find_norm(V_unnorm)
-            #TODO: ADDITION END
             ray = lambda t: p_0_cam + t*V
-            #rays_array[i,j] = np.vectorize(ray)
 
             closest_surface, min_t = find_intersection(p_0_cam,V)
-            #print("min_t = "+str(min_t) +" closest obj: " +str(closest_surface))
+
             #here we've got the closest surface saved together with the t_value
             #might not need this line
             #associated_surfaces[i,j] = closest_surface
             #Compute the color of the surface:
-            #TODO: ADDITION
             intersect_point = ray(min_t)
             color = find_color(intersect_point,V,closest_surface,1)
-            #TODO: ADDITION END
 
-
+            #put color in image array
             image_array[i,j,0] = 255*color[0]
             image_array[i,j,1] = 255*color[1]
             image_array[i,j,2] = 255*color[2]
-            #print("imcolor: " +str(image_array[i,j]))
             count+=1
-            #TODO: ADDITION
+            #go to the next point on screen
             p+=v_x*(w/args.width)
-            #TODO: ADDITION END
 
 
             
 
 
-    #print("image array: "+str(image_array))
     end_time = time.time()
     elapsed_time = end_time - start_time
     print("Elapsed time:", elapsed_time, "seconds")
@@ -193,9 +169,6 @@ def find_intersection(p_0,V):
         # seen in the image.
         if isinstance(surf,Cube):
             #extract parameters
-            #TODO: check compatibility
-            #extract parameters
-
             cube_mid = np.array(surf.position)
             edge_len = surf.scale
             planes_N = [np.array((1,0,0)),np.array((1,0,0)),np.array((0,1,0)),np.array((0,1,0)),\
@@ -209,8 +182,6 @@ def find_intersection(p_0,V):
                 p0_dot_N = np.dot(p_0,N)
                 V_dot_N = np.dot(V,N)
                 t_plane = (d_plane-p0_dot_N)/V_dot_N
-                #if t_plane<=0:
-                #    t_plane = float("inf")
                 planes_t.append(t_plane)
             t_x_min = min(planes_t[0],planes_t[1])
             t_x_max = max(planes_t[0],planes_t[1])
@@ -231,22 +202,7 @@ def find_intersection(p_0,V):
             if (t_enter<min_t):
                 min_t = t_enter
                 closest_surface = surf
-            # min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            # min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            # max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            # max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            # t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
-            # t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
-            # t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
-            # t_enter = max(t_min_x,t_min_y,t_min_z)
-            # t_exit = min(t_max_x,t_max_y,t_max_z)
-            # if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
-            #     #no intersection
-                #continue
-            #there is an intersection, t=t_enter
-            #if (t_enter<min_t):
-             #   min_t = t_enter
-              #  closest_surface = surf
+
         elif isinstance(surf,Sphere):
             #geometric approach
             O = np.array(surf.position)
@@ -262,40 +218,11 @@ def find_intersection(p_0,V):
             sphere_min_t = t_ca-t_hc
             if (sphere_min_t<=0):
                 continue
-            #print("sphere instersect")
             if (sphere_min_t<min_t):
                 #need to update closest surface
                 min_t =sphere_min_t
                 closest_surface = surf
 
-
-
-
-            """
-            O = np.array(obj.position)
-            r = obj.radius
-            #need to solve a quadratic equation
-            a = 1
-            b = 2*np.dot(V,p_0-O)
-            c = ((p_0[0]-O[0])**2+(p_0[1]-O[1])**2+(p_0[2]-O[2])**2)-r**2
-            delta = b**2-4*a*c
-            if (delta<0): #a complex number - ray does not intersect with the sphere
-                continue
-            t1 = (-b+np.sqrt(delta))/(2*a)
-            t2 = (-b-np.sqrt(delta))/(2*a)
-            if (t1<0):
-                sphere_min_t = t2
-            if (t2<0):
-                sphere_min_t = t1
-            else:
-                sphere_min_t = min(t1,t2)
-            if sphere_min_t<=0:
-                continue
-            if (sphere_min_t<=min_t):
-                #need to update closest surface
-                min_t =sphere_min_t
-                closest_surface = obj
-        """
         elif isinstance(surf, InfinitePlane):
             #extract parameters
             N = np.array(surf.normal)
@@ -309,32 +236,6 @@ def find_intersection(p_0,V):
                 min_t = t_plane
                 closest_surface = surf
 
-            """
-            #extract parameters
-            N = np.array(obj.normal)
-            d_plane = obj.offset
-            #need to find a point on the plane
-            if N[2]!=0:
-                plane_point = np.array((0.0,0.0,-d_plane/N[2]))
-            elif N[1]!=0:
-                plane_point = np.array((0.0,-d_plane/N[1],0.0))
-            elif N[0]!=0:
-                plane_point = np.array((-d_plane/N[0],0.0,0.0))
-            dot_prod = np.dot(V,N)
-            if (np.abs(dot_prod)<EPSILON):
-                #ray is parallel or nearly parallel to the plane - no intersection
-                continue
-            #there could still be an intersection
-            #TODO: check if valid
-            t_plane = np.dot(N,plane_point-p_0)/dot_prod
-            if t_plane<=0: #no intersection
-                continue
-            if t_plane<=min_t:
-                min_t = t_plane
-                closest_surface = obj
-                """
-    #if isinstance(closest_surface,Sphere):
-        #print("Sphere chosen")
     return closest_surface, min_t
 
 def find_color(intersect_point,V,surface,depth):
@@ -348,29 +249,25 @@ def find_color(intersect_point,V,surface,depth):
     #(background color) · transparency
     #+(diffuse + specular) · (1 − transparency)
     #+(reflection color)
-    #print("depth = " +str(depth))
     global camera, scene_settings
     scene = scene_settings
     if surface==0:
         #return background color if the original ray does not intersect any surface
-        #print("background color: "+str(scene.background_color))
         return np.array(scene.background_color)
+    
     global lights_lst, materials_lst
     mat_id = surface.material_index
     transparency = materials_lst[mat_id-1].transparency
     diffuse_color = np.array(materials_lst[mat_id-1].diffuse_color)
     specular_color = np.array(materials_lst[mat_id-1].specular_color)
     reflection_color = np.array(materials_lst[mat_id-1].reflection_color)
-    #print("reflection_color: "+str(reflection_color))
     phong_spec_efficiency = materials_lst[mat_id-1].shininess
     #p is the ray's intersection with the surface/pixel's location in the real world
     N = find_surface_normal(surface,intersect_point)
-    if N is None:
-        print("intersection point: " +str(intersect_point))
-        print("depth: " +str(depth))
     diff_color = np.array((0.0,0.0,0.0))
     spec_color = np.array((0.0,0.0,0.0))
     color = np.array((0.0,0.0,0.0))
+
     for light in lights_lst:
         #extract light data
         light_pos = np.array(light.position)
@@ -378,35 +275,24 @@ def find_color(intersect_point,V,surface,depth):
         light_specular_intensity = light.specular_intensity
         #it's a light
         light_intensity = find_light_intensity(light,intersect_point,surface)
-        #TODO: STOP
-        #print("light_intensity: " +str(light_intensity))
         I_L = light_intensity*light_color
-        #print("I_L: " +str(I_L))
         #create a ray from the light to the object
         L_unnorm = light_pos-intersect_point
         L = L_unnorm/find_norm(L_unnorm)
         N_dot_L = max(0,np.dot(L,N))
-        #print(np.dot(N,L)/(np.linalg.norm(N)*np.linalg.norm(L)))
-        #print("N_dot_L: " +str(N_dot_L))
         R_unnorm = 2*N_dot_L*N-L
         R = R_unnorm/find_norm(R_unnorm)
         R_dot_V = max(0,np.dot(R,-1*V))
-        #TODO: check if R_V or V_R
 
         #calculate diffuse_color
         diff_color += I_L*diffuse_color*N_dot_L
-        #print("I_L: "+str(I_L))
-        #print("N_dot_L: "+str(N_dot_L))
-        #print("diff_color: " +str(diff_color))
 
         #calculate specular color
         spec_color += I_L*specular_color*light_specular_intensity*\
                             (R_dot_V**phong_spec_efficiency)
-        #print("spec_color: " +str(spec_color))
-    color += (1-transparency)*(diff_color+spec_color)
-    #print("color: " +str(color))
 
-    #print("max recursion:" +str(scene.max_recursions))
+    color += (1-transparency)*(diff_color+spec_color)
+
     #check whether we've already reached our depth maximum. If so - return the color
     #If not - need to further check the reflections
     if (depth<scene.max_recursions):
@@ -419,9 +305,7 @@ def find_color(intersect_point,V,surface,depth):
         next_p = intersect_point+min_t_to_next_surface*R_reflect
         reflect_color = find_color(next_p,R_reflect,closest_next_surface,depth+1)
         color += reflect_color*reflection_color
-        #print("color: " +str(color) + ", depth: " +str(depth))
 
-        #print("transparency: " +str(transparency))
         if transparency!=0: #the material is somewhat transparent and not opaque
             #need to calculate reflections
             exit_point = find_ray_exit_point(intersect_point,V,surface)
@@ -430,13 +314,13 @@ def find_color(intersect_point,V,surface,depth):
             transp_color = find_color(next_p,V,closest_next_surface,depth)
             
             color += transparency*transp_color
-            #print("color: " +str(color) + ", depth: " +str(depth))
 
 
 
-    #print("final color: " +str(color) + ", depth = " +str(depth))
     return np.array((min(color[0],1.0),min(color[1],1.0),min(color[2],1.0)))
 
+
+#find the normal according to the surface
 def find_surface_normal(surface,intersect_point):
     if isinstance(surface,InfinitePlane):
         return np.array(surface.normal)/find_norm(np.array(surface.normal))
@@ -447,7 +331,6 @@ def find_surface_normal(surface,intersect_point):
         return norm_unnorm/find_norm(norm_unnorm)
     
     if isinstance(surface,Cube):
-        """PREV_IMP"""
         cube_center = np.array(surface.position)
         edge_len = surface.scale
         #need to find which plane of the six edges includes the intersection point
@@ -473,14 +356,8 @@ def find_surface_normal(surface,intersect_point):
         d6 = cube_center[2]+0.5*edge_len
         if (abs(intersect_point[2]*1-d6)<EPSILON):
             return np.array((0.0,0.0,1.0))
-        #print(abs(intersect_point[0]-d1))
-        #print(abs(intersect_point[0]+d1))
-        #print(abs(intersect_point[1]-d2))
-        #print(abs(intersect_point[1]+d2))
-        #print(abs(intersect_point[2]-d))
-        #print(abs(intersect_point[2]+d))
-        print("WHYYYYYYYY")
-    
+        
+#used for reflections
 def find_ray_exit_point(p,V,surface):
     global camera
     p_0 = np.array(camera.position)
@@ -504,18 +381,6 @@ def find_ray_exit_point(p,V,surface):
     
     if isinstance(surface, Cube):
         #extract parameters
-        # cube_mid = np.array(surface.position)
-        # edge_len = surface.scale
-        # min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-        # min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-        # max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-        # max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-        # t_min_x, t_max_x = min_x-p_0[0]/V[0], max_x-p_0[0]/V[0]
-        # t_min_y, t_max_y = min_y-p_0[1]/V[1], max_y-p_0[1]/V[1]
-        # t_min_z, t_max_z = min_z-p_0[2]/V[2], max_z-p_0[2]/V[2]
-        # t_exit = min(t_max_x,t_max_y,t_max_z)
-
-
         cube_mid = np.array(surface.position)
         edge_len = surface.scale
         planes_N = [np.array((1,0,0)),np.array((1,0,0)),np.array((0,1,0)),np.array((0,1,0)),\
@@ -529,8 +394,6 @@ def find_ray_exit_point(p,V,surface):
             p0_dot_N = np.dot(p,N)
             V_dot_N = np.dot(V,N)
             t_plane = (d_plane-p0_dot_N)/V_dot_N
-            #if t_plane<=0:
-            #    t_plane = float("inf")
             planes_t.append(t_plane)
         t_x_min = min(planes_t[0],planes_t[1])
         t_x_max = max(planes_t[0],planes_t[1])
@@ -573,28 +436,22 @@ def find_light_intensity(light,p,surface):
         plane_point_y = 20*random.random()
         plane_point = np.array((plane_point_x,plane_point_y,\
                                 (d-plane_point_x*ray_vector[0]-plane_point_y*ray_vector[1])/ray_vector[2]))
-        #plane_point = np.array((0.0,0.0,-d/ray_vector[2]))
     elif (ray_vector[1]!=0):
         plane_point_x = 10*random.random()
         plane_point_z = 20*random.random()
         plane_point = np.array((plane_point_x,(d-plane_point_x*ray_vector[0])/ray_vector[1],\
                                 plane_point_z))
-        #plane_point = np.array((0.0,-d/ray_vector[1],0.0))
     elif (ray_vector[0]!=0):
         plane_point_y = 10*random.random()
         plane_point_z = 20*random.random()
         plane_point = np.array(d/ray_vector[0],\
                                 plane_point_y,plane_point_z)
-        #plane_point = np.array((-d/ray_vector[0],0.0,0.0))
     #now we have a point, let's find parametric representation of the plane
     first_direc_unnorm = plane_point-light_pos
     first_direc = first_direc_unnorm/find_norm(first_direc_unnorm)
     second_direc_unnorm = np.cross(first_direc,ray_vector)
     second_direc = second_direc_unnorm/find_norm(second_direc_unnorm)
     first_rect_point = light_pos-0.5*light_radius*(first_direc+second_direc)
-    #first_rect_point = np.array((light_pos[0]-0.5*light_radius*(first_direc[0]+second_direc[0]),\
-    #                    light_pos[1]-0.5*light_radius*(first_direc[1]+second_direc[1]),\
-    #                    light_pos[2]-0.5*light_radius*(first_direc[2]+second_direc[2])))
     shadow_rays_num = int(scene.root_number_shadow_rays)
     hit_count = 0
     for i in range(shadow_rays_num):
@@ -608,11 +465,12 @@ def find_light_intensity(light,p,surface):
             shadow_ray = shadow_ray_unnorm/find_norm(shadow_ray_unnorm)
             if shadow=='n':
                 hit_count+=1
-            else:
+            else: #bonus
                 hit_count+=calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface)
 
     hit_rate = hit_count/(float(shadow_rays_num)*shadow_rays_num)
     return (1-light_shadow_intensity)+light_shadow_intensity*hit_rate
+
 
 def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
     global surfaces_lst, materials_lst
@@ -624,23 +482,6 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
         obj = surfaces_lst[i]
         if isinstance(obj,Cube):
             #extract parameters
-            # cube_mid = np.array(obj.position)
-            # edge_len = obj.scale
-            # min_x, min_y, min_z = min(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            # min(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), min(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            # max_x, max_y, max_z = max(cube_mid[0]+edge_len/2,cube_mid[0]-edge_len/2),\
-            # max(cube_mid[1]+edge_len/2,cube_mid[1]-edge_len/2), max(cube_mid[2]+edge_len/2,cube_mid[2]-edge_len/2)
-            # t_min_x, t_max_x = min_x-sample_point_in_loop[0]/shadow_ray[0],\
-            #       max_x-sample_point_in_loop[0]/shadow_ray[0]
-            # t_min_y, t_max_y = min_y-sample_point_in_loop[1]/shadow_ray[1], \
-            #     max_y-sample_point_in_loop[1]/shadow_ray[1]
-            # t_min_z, t_max_z = min_z-sample_point_in_loop[2]/shadow_ray[2], \
-            #     max_z-sample_point_in_loop[2]/shadow_ray[2]
-            # t_enter = max(t_min_x,t_min_y,t_min_z)
-            # t_exit = min(t_max_x,t_max_y,t_max_z)
-            # if (t_enter>t_exit) or (t_max_x<0) or (t_max_y<0) or (t_max_z<0) or (t_enter<=0):
-            #     #no intersection
-            #     continue
             cube_mid = np.array(obj.position)
             edge_len = obj.scale
             planes_N = [np.array((1,0,0)),np.array((1,0,0)),np.array((0,1,0)),np.array((0,1,0)),\
@@ -648,14 +489,12 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
             planes_d = [cube_mid[0]+0.5*edge_len,cube_mid[0]-0.5*edge_len,cube_mid[1]+0.5*edge_len,cube_mid[1]-0.5*edge_len,\
                         cube_mid[2]+0.5*edge_len,cube_mid[2]-0.5*edge_len]
             planes_t = []
-            for i in range(6): #number of edges in a cube
-                N = planes_N[i]
-                d_plane = planes_d[i]
+            for j in range(6): #number of edges in a cube
+                N = planes_N[j]
+                d_plane = planes_d[j]
                 p0_dot_N = np.dot(sample_point_in_loop,N)
                 V_dot_N = np.dot(shadow_ray,N)
                 t_plane = (d_plane-p0_dot_N)/V_dot_N
-                #if t_plane<=0:
-                #    t_plane = float("inf")
                 planes_t.append(t_plane)
             t_x_min = min(planes_t[0],planes_t[1])
             t_x_max = max(planes_t[0],planes_t[1])
@@ -696,20 +535,6 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
             if (sphere_min_t<=0):
                 continue
             
-            """prev_imp
-            O = np.array(obj.position)
-            r = obj.radius
-            #need to solve a quadratic equation
-            a = 1
-            b = 2*np.dot(shadow_ray,sample_point_in_loop-O)
-            c = ((sample_point_in_loop[0]-O[0])**2+(sample_point_in_loop[1]-O[1])**2+(sample_point_in_loop[2]-O[2])**2)-r**2
-            delta = b**2-4*a*c
-            if (delta<0): #a complex number - ray does not intersect with the sphere
-                continue
-            t1 = (-b+np.sqrt(delta))/(2*a)
-            t2 = (-b-np.sqrt(delta))/(2*a)
-            sphere_min_t = min(t1,t2)
-            """
             t_list[i] = sphere_min_t
             if (isinstance(surface, Sphere) and \
                 obj.position==surface.position and obj.radius==surface.radius and \
@@ -725,26 +550,6 @@ def calculate_shadow_transparency(sample_point_in_loop,shadow_ray,surface):
             if t_plane<=0:
                 continue
 
-            """prev_imp
-            #extract parameters
-            N = np.array(obj.normal)
-            d_plane = obj.offset
-            #need to find a point on the plane
-            if N[2]!=0:
-                plane_point = np.array((0.0,0.0,-d_plane/N[2]))
-            elif N[1]!=0:
-                plane_point = np.array((0.0,-d_plane/N[1],0.0))
-            elif N[0]!=0:
-                plane_point = np.array((-d_plane/N[0],0.0,0.0))
-            dot_prod = np.dot(shadow_ray,N)
-            if (np.abs(dot_prod)<EPSILON):
-                #ray is parallel or nearly parallel to the plane - no intersection
-                continue
-            #there could still be an intersection
-            t_plane = np.dot(N,plane_point-sample_point_in_loop)/dot_prod
-            if t_plane<=0: #no intersection
-                continue
-                """
             t_list[i] = t_plane
             if (isinstance(surface, InfinitePlane) and \
                 obj.normal==surface.normal and obj.offset==surface.offset and \
@@ -770,7 +575,7 @@ def init_lists():
         obj = objects_lst[i]
         if isinstance(obj,Material):
             mat_lst.append(obj)
-        if isinstance(obj,Light):
+        elif isinstance(obj,Light):
             light_lst.append(obj)
         else:
             surf_lst.append(obj)
@@ -782,6 +587,7 @@ def init_lists():
     surfaces_lst = surf_lst
     lights_lst = light_lst
     return
+
 
 def find_norm(vec):
     return np.sqrt(np.square(vec[0])+np.square(vec[1])+np.square(vec[2]))

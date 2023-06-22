@@ -1,0 +1,5 @@
+Eldad Lighishal: 316460815
+Guy Paz Ben Itzhak: 315328963
+
+the code runs in default with the shadow transparency calculation.
+In order to avoid it, one must add '--shadow n' to the command.
